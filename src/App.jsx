@@ -76,11 +76,22 @@ const getRevenueWithoutVAT = (order) => {
   const products = order.raw_data?.products || [];
   let total = 0;
   products.forEach(p => {
-    total += parseFloat(p.price_without_vat || 0);
+    total += parseFloat(p.price_without_vat || 0) * (p.quantity || 1);
   });
   // Převod měny
   const currency = order.currency || 'CZK';
   return total * (CURRENCY_RATES[currency] || 1);
+};
+
+// Deduplikace objednávek (ochrana proti duplicitním záznamům ze syncu)
+const deduplicateOrders = (orders) => {
+  const seen = new Set();
+  return orders.filter(o => {
+    const key = o.order_code || o.raw_data?.code || o.id;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 };
 
 const formatNumber = (num) => Math.round(num).toLocaleString('cs-CZ');
@@ -395,7 +406,14 @@ export default function App() {
     }
     
     fetchAllOrders()
-      .then(d => { setOrders(d); setLoading(false); })
+      .then(d => {
+        const deduped = deduplicateOrders(d);
+        setOrders(deduped);
+        if (deduped.length < d.length) {
+          console.warn(`⚠️ Deduplikace: ${d.length} → ${deduped.length} (odstraněno ${d.length - deduped.length} duplikátů)`);
+        }
+        setLoading(false);
+      })
       .catch(e => { setError(e.message); setLoading(false); });
   }, [dateFrom, dateTo]);
 
