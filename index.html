@@ -1,13 +1,1582 @@
 <!DOCTYPE html>
 <html lang="cs">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Order Analytics | REGAL MASTER</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Zone4You - Rozvrh lekcí</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #E67E22;
+            --primary-dark: #D35400;
+            --primary-light: #FDEBD0;
+            --success: #27AE60;
+            --success-light: #D5F5E3;
+            --danger: #E74C3C;
+            --danger-light: #FADBD8;
+            --gray-50: #F8FAFC;
+            --gray-100: #F1F5F9;
+            --gray-200: #E2E8F0;
+            --gray-300: #CBD5E1;
+            --gray-400: #94A3B8;
+            --gray-500: #64748B;
+            --gray-600: #475569;
+            --gray-700: #334155;
+            --gray-800: #1E293B;
+            --radius: 12px;
+            --radius-sm: 8px;
+            --shadow: 0 1px 3px rgba(0,0,0,0.1);
+            --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1);
+
+            /* Room colors matching the photo */
+            --sal1: #D4A574;
+            --sal2: #8B4513;
+            --sal3: #CD853F;
+            --reformer: #A0522D;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--gray-50);
+            color: var(--gray-800);
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            background: white;
+            border-bottom: 1px solid var(--gray-200);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 700;
+            font-size: 18px;
+        }
+
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 14px;
+        }
+
+        .user-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 10px 16px;
+            border-radius: var(--radius-sm);
+            font-weight: 500;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+            font-family: inherit;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+        }
+
+        .btn-outline {
+            background: white;
+            border: 1px solid var(--gray-200);
+            color: var(--gray-700);
+        }
+
+        .btn-outline:hover {
+            background: var(--gray-50);
+        }
+
+        /* Main Content */
+        .main {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px 16px;
+        }
+
+        /* View Toggle */
+        .view-section {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .view-toggle {
+            display: flex;
+            background: white;
+            border-radius: var(--radius);
+            padding: 4px;
+            box-shadow: var(--shadow);
+        }
+
+        .view-btn {
+            padding: 10px 16px;
+            border: none;
+            background: transparent;
+            border-radius: var(--radius-sm);
+            font-weight: 500;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: var(--gray-600);
+            font-family: inherit;
+        }
+
+        .view-btn.active {
+            background: var(--primary);
+            color: white;
+        }
+
+        .view-btn:hover:not(.active) {
+            background: var(--gray-100);
+        }
+
+        /* Day Selector */
+        .day-selector {
+            display: flex;
+            gap: 4px;
+            background: white;
+            padding: 4px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            overflow-x: auto;
+        }
+
+        .day-btn {
+            padding: 10px 14px;
+            border: none;
+            background: transparent;
+            border-radius: var(--radius-sm);
+            font-weight: 500;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: var(--gray-600);
+            font-family: inherit;
+            white-space: nowrap;
+        }
+
+        .day-btn.active {
+            background: var(--primary);
+            color: white;
+        }
+
+        .day-btn.today {
+            border: 2px solid var(--primary);
+        }
+
+        .day-btn:hover:not(.active) {
+            background: var(--gray-100);
+        }
+
+        /* Legend */
+        .legend {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            padding: 12px 16px;
+            background: white;
+            border-radius: var(--radius);
+            margin-bottom: 20px;
+            box-shadow: var(--shadow);
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--gray-600);
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+
+        .legend-item:hover {
+            background: var(--gray-100);
+        }
+
+        .legend-item.active {
+            background: var(--primary-light);
+            color: var(--primary-dark);
+            font-weight: 600;
+        }
+
+        .legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+        }
+
+        /* Sport Type Filter */
+        .filter-section {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .filter-label {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--gray-600);
+        }
+
+        .filter-chips {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .filter-chip {
+            padding: 6px 12px;
+            background: white;
+            border: 1px solid var(--gray-200);
+            border-radius: 20px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: var(--gray-600);
+        }
+
+        .filter-chip:hover {
+            background: var(--gray-100);
+        }
+
+        .filter-chip.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        .filter-reset {
+            background: none;
+            border: none;
+            color: var(--primary);
+            font-size: 13px;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
+        .filter-reset:hover {
+            color: var(--primary-dark);
+        }
+
+        /* Schedule Grid - Day View */
+        .schedule-day {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .time-group {
+            background: white;
+            border-radius: var(--radius);
+            overflow: hidden;
+            box-shadow: var(--shadow);
+        }
+
+        .time-group-header {
+            padding: 12px 16px;
+            background: var(--gray-100);
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--gray-700);
+            border-bottom: 1px solid var(--gray-200);
+        }
+
+        .lesson-row {
+            display: flex;
+            align-items: center;
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--gray-100);
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .lesson-row:last-child {
+            border-bottom: none;
+        }
+
+        .lesson-row:hover {
+            background: var(--gray-50);
+        }
+
+        .lesson-time {
+            width: 70px;
+            font-weight: 600;
+            font-size: 15px;
+            color: var(--gray-800);
+        }
+
+        .lesson-info {
+            flex: 1;
+            padding-left: 12px;
+            border-left: 3px solid var(--sal1);
+        }
+
+        .lesson-name {
+            font-weight: 600;
+            font-size: 15px;
+            margin-bottom: 2px;
+        }
+
+        .lesson-meta {
+            font-size: 13px;
+            color: var(--gray-500);
+        }
+
+        .lesson-status {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-available {
+            background: var(--success-light);
+            color: var(--success);
+        }
+
+        .status-few {
+            background: var(--primary-light);
+            color: var(--primary-dark);
+        }
+
+        .status-full {
+            background: var(--danger-light);
+            color: var(--danger);
+        }
+
+        /* Week View */
+        .schedule-week {
+            display: none;
+            overflow-x: auto;
+        }
+
+        .schedule-week.active {
+            display: block;
+        }
+
+        .schedule-day.active {
+            display: flex;
+        }
+
+        .schedule-day:not(.active) {
+            display: none;
+        }
+
+        .week-table {
+            width: 100%;
+            min-width: 900px;
+            border-collapse: collapse;
+            background: white;
+            border-radius: var(--radius);
+            overflow: hidden;
+            box-shadow: var(--shadow);
+        }
+
+        .week-table th {
+            padding: 14px 8px;
+            background: var(--gray-100);
+            font-weight: 600;
+            font-size: 13px;
+            text-align: center;
+            border-bottom: 1px solid var(--gray-200);
+            position: sticky;
+            top: 0;
+        }
+
+        .week-table th.today-col {
+            background: var(--primary-light);
+            color: var(--primary-dark);
+        }
+
+        .week-table td {
+            padding: 4px;
+            border: 1px solid var(--gray-100);
+            vertical-align: top;
+            height: 80px;
+            width: 13%;
+        }
+
+        .week-table td:first-child {
+            width: 60px;
+            text-align: center;
+            font-weight: 500;
+            font-size: 12px;
+            color: var(--gray-500);
+            vertical-align: middle;
+        }
+
+        .week-lesson {
+            padding: 4px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-bottom: 2px;
+            cursor: pointer;
+            transition: transform 0.1s;
+            color: white;
+            line-height: 1.3;
+        }
+
+        .week-lesson:hover {
+            transform: scale(1.02);
+        }
+
+        .week-lesson-name {
+            font-weight: 600;
+        }
+
+        .week-lesson-time {
+            opacity: 0.9;
+        }
+
+        /* Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .modal-overlay.open {
+            display: flex;
+        }
+
+        .modal {
+            background: white;
+            border-radius: var(--radius);
+            max-width: 480px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: var(--gray-400);
+            line-height: 1;
+        }
+
+        .modal-body {
+            padding: 20px;
+        }
+
+        .modal-info {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .modal-info-row {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .modal-info-label {
+            color: var(--gray-500);
+            font-size: 14px;
+        }
+
+        .modal-info-value {
+            font-weight: 500;
+        }
+
+        /* Instructor section in modal */
+        .modal-instructor-section {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 20px;
+            padding: 16px;
+            background: var(--gray-50);
+            border-radius: var(--radius-sm);
+            margin-bottom: 16px;
+        }
+
+        .modal-instructor-photo {
+            width: 180px;
+            height: 180px;
+            min-width: 180px;
+            border-radius: 8px;
+            object-fit: cover;
+            object-position: top;
+        }
+
+        .modal-instructor-photo-placeholder {
+            width: 180px;
+            height: 180px;
+            min-width: 180px;
+            border-radius: 50%;
+            background: var(--gray-200);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 60px;
+            color: var(--gray-400);
+        }
+
+        .modal-instructor-info {
+            text-align: left;
+        }
+
+        .modal-instructor-info h4 {
+            font-size: 22px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .modal-instructor-info p {
+            font-size: 15px;
+            color: var(--gray-500);
+            line-height: 1.4;
+        }
+
+        /* Lesson description in modal */
+        .modal-description {
+            padding: 16px;
+            background: var(--primary-light);
+            border-radius: var(--radius-sm);
+            margin-bottom: 16px;
+            border-left: 4px solid var(--primary);
+        }
+
+        .modal-description-title {
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 8px;
+            color: var(--primary-dark);
+        }
+
+        .modal-description-text {
+            font-size: 14px;
+            line-height: 1.6;
+            color: var(--gray-700);
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .modal-actions .btn {
+            flex: 1;
+        }
+
+        /* Toast */
+        .toast-container {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            z-index: 1001;
+        }
+
+        .toast {
+            background: white;
+            padding: 16px 20px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-lg);
+            margin-bottom: 10px;
+            animation: slideIn 0.3s ease;
+            border-left: 4px solid var(--success);
+        }
+
+        .toast.error {
+            border-left-color: var(--danger);
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        /* My Reservations */
+        .my-reservations {
+            display: none;
+        }
+
+        .my-reservations.active {
+            display: block;
+        }
+
+        .reservations-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .reservation-card {
+            background: white;
+            border-radius: var(--radius);
+            padding: 16px;
+            box-shadow: var(--shadow);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .reservation-info h4 {
+            font-size: 16px;
+            margin-bottom: 4px;
+        }
+
+        .reservation-info p {
+            font-size: 13px;
+            color: var(--gray-500);
+        }
+
+        .btn-cancel {
+            background: var(--danger-light);
+            color: var(--danger);
+            border: none;
+            padding: 8px 16px;
+            border-radius: var(--radius-sm);
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            background: white;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .empty-state h3 {
+            margin-bottom: 8px;
+            color: var(--gray-700);
+        }
+
+        .empty-state p {
+            color: var(--gray-500);
+            margin-bottom: 20px;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .view-section {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .day-selector {
+                justify-content: flex-start;
+            }
+
+            .legend {
+                gap: 12px;
+            }
+
+            .legend-item {
+                font-size: 12px;
+            }
+
+            .lesson-row {
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+
+            .lesson-status {
+                width: 100%;
+                text-align: center;
+                margin-top: 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <div class="logo-icon">Z4Y</div>
+                <span>Zone4You</span>
+            </div>
+            <div class="user-section">
+                <button class="btn btn-outline" onclick="showMyReservations()" id="myResBtn">Moje rezervace</button>
+                <button class="btn btn-primary" onclick="toggleLogin()" id="loginBtn">Přihlásit se</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Main Content -->
+    <main class="main">
+        <!-- Schedule Section -->
+        <div id="scheduleSection">
+            <!-- View Controls -->
+            <div class="view-section">
+                <div class="view-toggle">
+                    <button class="view-btn active" onclick="setView('day', this)">Den</button>
+                    <button class="view-btn" onclick="setView('week', this)">Týden</button>
+                </div>
+                <div class="day-selector" id="daySelector"></div>
+            </div>
+
+            <!-- Legend - Room Filter -->
+            <div class="legend" id="roomFilter">
+                <div class="legend-item active" data-room="all" onclick="filterByRoom('all', this)">
+                    <span class="legend-dot" style="background: linear-gradient(135deg, var(--sal1), var(--reformer));"></span>
+                    Všechny
+                </div>
+                <div class="legend-item" data-room="Sál 1" onclick="filterByRoom('Sál 1', this)">
+                    <span class="legend-dot" style="background: var(--sal1);"></span>
+                    Sál 1
+                </div>
+                <div class="legend-item" data-room="Sál 2" onclick="filterByRoom('Sál 2', this)">
+                    <span class="legend-dot" style="background: var(--sal2);"></span>
+                    Sál 2
+                </div>
+                <div class="legend-item" data-room="Sál 3" onclick="filterByRoom('Sál 3', this)">
+                    <span class="legend-dot" style="background: var(--sal3);"></span>
+                    Sál 3
+                </div>
+                <div class="legend-item" data-room="Reformer" onclick="filterByRoom('Reformer', this)">
+                    <span class="legend-dot" style="background: var(--reformer);"></span>
+                    Reformer
+                </div>
+            </div>
+
+            <!-- Sport Type Filter -->
+            <div class="filter-section">
+                <span class="filter-label">Typ lekce:</span>
+                <div class="filter-chips" id="sportFilter"></div>
+                <button class="filter-reset" onclick="resetFilters()">Zrušit filtry</button>
+            </div>
+
+            <!-- Day View -->
+            <div class="schedule-day active" id="dayView"></div>
+
+            <!-- Week View -->
+            <div class="schedule-week" id="weekView"></div>
+        </div>
+
+        <!-- My Reservations Section -->
+        <div class="my-reservations" id="myReservations">
+            <h2 style="margin-bottom: 20px;">Moje rezervace</h2>
+            <div class="reservations-list" id="reservationsList"></div>
+        </div>
+    </main>
+
+    <!-- Lesson Modal -->
+    <div class="modal-overlay" id="lessonModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title" id="modalTitle">Název lekce</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Instructor Section -->
+                <div class="modal-instructor-section" id="modalInstructorSection">
+                    <div class="modal-instructor-photo-placeholder" id="modalInstructorPhotoContainer">
+                        👤
+                    </div>
+                    <div class="modal-instructor-info">
+                        <h4 id="modalInstructorName">Instruktor</h4>
+                        <p id="modalInstructorSpecialization">Specializace</p>
+                    </div>
+                </div>
+
+                <!-- Lesson Description -->
+                <div class="modal-description" id="modalDescriptionSection">
+                    <div class="modal-description-title">O lekci</div>
+                    <div class="modal-description-text" id="modalDescription">Popis lekce...</div>
+                </div>
+
+                <div class="modal-info">
+                    <div class="modal-info-row">
+                        <span class="modal-info-label">Čas</span>
+                        <span class="modal-info-value" id="modalTime">9:00 - 9:50</span>
+                    </div>
+                    <div class="modal-info-row">
+                        <span class="modal-info-label">Místnost</span>
+                        <span class="modal-info-value" id="modalRoom">Sál 1</span>
+                    </div>
+                    <div class="modal-info-row">
+                        <span class="modal-info-label">Den</span>
+                        <span class="modal-info-value" id="modalDay">Pondělí</span>
+                    </div>
+                    <div class="modal-info-row">
+                        <span class="modal-info-label">Volná místa</span>
+                        <span class="modal-info-value" id="modalSpots">5/12</span>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-outline" onclick="closeModal()">Zavřít</button>
+                    <button class="btn btn-primary" onclick="bookLesson()" id="bookBtn">Rezervovat</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // =============================================
+        // REÁLNÝ ROZVRH LEKCÍ Z FOTKY + DATA Z ZONE4YOU.CZ
+        // =============================================
+
+        // Popisy lekcí (získáno z zone4you.cz/salove-lekce/)
+        const lessonDescriptions = {
+            'HIIT': 'Vysoko intenzivní intervalový trénink střídající krátké úseky velmi intenzivního cvičení s odpočinkovými fázemi. Efektivní pro spalování tuků a zlepšení kondice.',
+            'BODY FORMING': 'Aerobně vedená lekce kombinující prvky základní choreografie s posilovacími cviky. Zaměřená na formování postavy a zpevnění svalů.',
+            'POZADÍ A BŘICHO': 'Cvičení se zaměřením na posílení svalů pozadí a břišních svalů. Ideální pro formování problémových partií.',
+            'WORLD JUMPING': 'Energetické skupinové cvičení na malých trampolínách. Zábavný způsob, jak zlepšit kondici a koordinaci.',
+            'PUMPING': 'Posilovací hodina s využitím bosu a nakládacích činek. Zaměřeno na posílení celého těla.',
+            'BOOT CAMP': 'Vysoko intenzivní intervalový trénink inspirovaný vojenskou přípravou. Kombinace kardio a silových cviků.',
+            'FIT DANCE LATINO': 'Cardio taneční trénink s latinsko-americkými rytmy. Zábavný způsob, jak spálit kalorie.',
+            'FUNKČNÍ TRÉNINK': 'Lekce zaměřená na posilování celého těla pomocí funkčních pohybů využitelných v každodenním životě.',
+            'HEAT': 'High Energy Aerobic Training na speciálním běžícím pásu Maxerrunner®. Intenzivní kardio trénink.',
+            'H.E.A.T.': 'High Energy Aerobic Training na speciálním běžícím pásu Maxerrunner®. Intenzivní kardio trénink.',
+            'HEAT easy': 'Lehčí varianta H.E.A.T. tréninku vhodná pro začátečníky nebo jako regenerační trénink.',
+            'SPINNING': 'Energeticky účinné skupinové cvičení na stacionárních kolech. Vynikající kardio trénink.',
+            "SPINNING 90'": 'Prodloužená verze spinningu pro náročnější cyklisty. 90 minut intenzivního tréninku.',
+            'ZDRAVÁ ZÁDA': 'Zdravotní cvičení, které napomáhá odstranění svalových dysbalancí a bolestí zad.',
+            'ZDRAVÁ ZÁDA A CORE': 'Kombinace cvičení pro zdravá záda s posílením hlubokého stabilizačního systému.',
+            'PILATES': 'Cvičební systém vedoucí k posílení a protažení svalů celého těla. Důraz na správné držení těla.',
+            'POWER JOGA': 'Cvičení založené na pravidelném opakování základních jógových pozic s dynamickým provedením.',
+            'SM systém': 'Rehabilitační cvičení podle metody MUDr. Smíška, které pomáhá odstraňovat bolesti zad.',
+            'JOGA': 'Starodávná praxe propojující tělo, mysl a ducha. Harmonizující cvičení pro celkovou pohodu.',
+            'RANNÍ JOGA': 'Jemná ranní jóga pro probuzení těla a mysli. Ideální start do nového dne.',
+            'JOGA A MEDITACE': 'Spojení jógových ásan s meditačními technikami pro hlubokou relaxaci.',
+            'FASCIE - ZOGA': 'Jedinečný pohybový systém ZOGA Movement® zaměřený na práci s fasciemi a celkovým uvolněním těla.',
+            'REFORMER': 'Tréninkový program na speciálním Pilates stroji Reformer. Posílení hlubokého stabilizačního systému.',
+            'CORE': 'Cvičení zaměřené na posílení středu těla - břišních svalů a zádových svalů.',
+            'BOSU': 'Cvičení na balančních pomůckách BOSU pro zlepšení stability a posílení core.',
+            'BODY INTERVAL': 'Intervalový trénink kombinující kardio a silové prvky pro efektivní formování postavy.',
+            'BODY PUMP': 'Posilovací lekce s nakládacími činkami zaměřená na všechny svalové partie.',
+            'RANNÍ ENERGIE': 'Energizující ranní cvičení pro nastartování metabolismu a dobrou náladu.'
+        };
+
+        // Fotky instruktorů - lokální soubory
+        const instructorPhotos = {
+            'Zuzana Chlupová': 'images/instructors/chlupova-zuzana.png',
+            'Lucie Horelicová': 'images/instructors/olivova-lenka.png',
+            'Mgr. Lucie Horelicová': 'images/instructors/olivova-lenka.png',
+            'Lada Jestříbková': 'images/instructors/jestribkova-lada.png',
+            'Dagmar Krhutová': 'images/instructors/krhutova-dagmar.png',
+            'Charlota Treblíková': 'images/instructors/treblikova-charlota.png',
+            'Mgr. Charlota Treblíková': 'images/instructors/treblikova-charlota.png',
+            'Alex Vodička': 'images/instructors/vodicka-alex.png',
+            'Jana Malá': 'images/instructors/mala-jana.png',
+            'Hana Hrnčiariková': 'images/instructors/hrnciarikova-hana.png',
+            'Ing. Hana Hrnčiariková': 'images/instructors/hrnciarikova-hana.png',
+            'Petra Uhrová': 'images/instructors/uhrova-petra.png',
+            'Uhrová Petra': 'images/instructors/uhrova-petra.png',
+            'Michal Třískala': 'images/instructors/triskala-michal.png',
+            'Třískala Michal': 'images/instructors/triskala-michal.png',
+            'Ondřej Mužík': 'images/instructors/muzik-ondrej.png',
+            'Martin Tříska': 'images/instructors/triska-martin.png',
+            'Bc. Tříska Martin': 'images/instructors/triska-martin.png',
+            'Ivan Mičuda': 'images/instructors/micuda-ivan.png',
+            'Pavel Vácha': 'images/instructors/vacha-pavel.png',
+            'Vácha Pavel': 'images/instructors/vacha-pavel.png',
+            'Ing. Pavel Vácha': 'images/instructors/vacha-pavel.png',
+            'Jana Olszyńská': 'images/instructors/olszynska-jana.png',
+            'Ing. Jana Olszyńská': 'images/instructors/olszynska-jana.png',
+            'Monika Wais': 'images/instructors/wais-monika.png',
+            'Stanislava Šodková': 'images/instructors/sodkova-stanislava.png',
+            'Ing. Stanislava Šodková': 'images/instructors/sodkova-stanislava.png',
+            'Lucie Martincová': 'images/instructors/martincova-lucie.png',
+            'Bc. Lucie Martincová': 'images/instructors/martincova-lucie.png',
+            'Martin Wais': 'images/instructors/wais-martin.png',
+            'Pavel Dosoudil': 'images/instructors/dosoudil-pavel.png',
+            'Michaela Černocká': 'images/instructors/cernocka-michaela.png',
+            'Daniela Bláhová': 'images/instructors/blahova-daniela.png',
+            'Markéta Lukáš': 'images/instructors/lukas-marketa.png',
+            'Lenka Doležalová': 'images/instructors/dolezalova-lenka.png',
+            'Silvie Pantůčková': 'images/instructors/pantuckova-silvie.png',
+            'Veronika Nesvačilová': 'images/instructors/nesvacilova-veronika.png',
+            'Veronika Lésková': 'images/instructors/leskova-veronika.png',
+            'Jan Herajt': 'images/instructors/herajt-jan.png',
+            'Lenka Šoukalová': 'images/instructors/soukalova-lenka.png',
+            'Lucie Pešková': 'images/instructors/peskova-lucie.png',
+            'Petra Nováková': 'images/instructors/novakova-petra.png',
+            'Annette Hrušková': 'images/instructors/hruskova-annette.png',
+            'Annette Hrušková, DiS.': 'images/instructors/hruskova-annette.png',
+            'Lucie Sedláková': 'images/instructors/novakova-petra.png',
+            'Bc. Lucie Sedláková': 'images/instructors/novakova-petra.png',
+            'Lenka Olivová': 'images/instructors/olivova-lenka.png',
+            'Olivová Lenka': 'images/instructors/olivova-lenka.png'
+        };
+
+        // Specializace instruktorů
+        const instructorSpecializations = {
+            'Zuzana Chlupová': 'H.E.A.T., HIIT, Bodyforming, Pumping',
+            'Lucie Horelicová': 'H.E.A.T.',
+            'Mgr. Lucie Horelicová': 'H.E.A.T.',
+            'Lada Jestříbková': 'Power joga, H.E.A.T., Pilates Reformer',
+            'Dagmar Krhutová': 'Boot camp, Kruhový trénink',
+            'Charlota Treblíková': 'Bodyforming, Bosu, H.E.A.T., Reformer',
+            'Alex Vodička': 'Zdravá záda, Pilates Reformer',
+            'Jana Malá': 'Body interval, Pilates, DeepWork, Bosu',
+            'Hana Hrnčiariková': 'H.E.A.T.',
+            'Petra Uhrová': 'Spinning',
+            'Uhrová Petra': 'Spinning',
+            'Michal Třískala': 'Spinning',
+            'Třískala Michal': 'Spinning',
+            'Ondřej Mužík': 'World jumping, Pilates Reformer',
+            'Martin Tříska': 'Yin jóga, Zdravá záda',
+            'Ivan Mičuda': 'Spinning',
+            'Pavel Vácha': 'Spinning, Pump FX, Zdravá záda, Boot camp',
+            'Vácha Pavel': 'Spinning, Pump FX, Zdravá záda, Boot camp',
+            'Jana Olszyńská': 'H.E.A.T.',
+            'Monika Wais': 'Zdravá záda, Pilates, Bosu, Power joga',
+            'Stanislava Šodková': 'Jóga',
+            'Lucie Martincová': 'Bodyforming, Boot camp, Deep work, Pilates',
+            'Martin Wais': 'H.E.A.T., Rowing',
+            'Pavel Dosoudil': 'Spinning',
+            'Michaela Černocká': 'Spinning',
+            'Daniela Bláhová': 'Meditační jóga',
+            'Markéta Lukáš': 'Pilates, Spinning',
+            'Lenka Doležalová': 'Bosu bodyform, H.E.A.T.',
+            'Silvie Pantůčková': 'Bosu, Zdravá záda, Pilates',
+            'Veronika Nesvačilová': 'Břicho a pozadí',
+            'Veronika Lésková': 'World jumping',
+            'Jan Herajt': 'HIIT',
+            'Lenka Šoukalová': 'Funkční trénink',
+            'Lucie Pešková': 'Latino dance',
+            'Petra Nováková': 'H.E.A.T.',
+            'Annette Hrušková': 'Pilates Reformer',
+            'Lucie Sedláková': 'Pilates Reformer',
+            'Lenka Olivová': 'H.E.A.T.',
+            'Olivová Lenka': 'H.E.A.T.',
+            'Reformer tým': 'Pilates Reformer',
+            'Pilates tým': 'Pilates',
+            'Fitness tým': 'Skupinové lekce',
+            'Joga tým': 'Jóga a relaxace',
+            'Rehabilitační tým': 'Zdravotní cvičení',
+            'Jumping tým': 'World Jumping',
+            'Dance tým': 'Taneční lekce'
+        };
+
+        // Mapování cvičitelů pro lekce (získáno z memberzone.cz)
+        const instructors = {
+            'PUMPING': ['Vácha Pavel'],
+            'HEAT': ['Olivová Lenka', 'Vácha Pavel'],
+            'H.E.A.T.': ['Olivová Lenka'],
+            'HEAT easy': ['Olivová Lenka'],
+            'SPINNING': ['Vácha Pavel', 'Uhrová Petra'],
+            'REFORMER': ['Reformer tým'],
+            'PILATES': ['Pilates tým'],
+            'HIIT': ['Fitness tým'],
+            'BODY FORMING': ['Fitness tým'],
+            'POWER JOGA': ['Joga tým'],
+            'JOGA': ['Joga tým'],
+            'RANNÍ JOGA': ['Joga tým'],
+            'JOGA A MEDITACE': ['Joga tým'],
+            'ZDRAVÁ ZÁDA': ['Rehabilitační tým'],
+            'ZDRAVÁ ZÁDA A CORE': ['Rehabilitační tým'],
+            'CORE': ['Fitness tým'],
+            'BOOT CAMP': ['Fitness tým'],
+            'BOSU': ['Fitness tým'],
+            'WORLD JUMPING': ['Jumping tým'],
+            'FUNKČNÍ TRÉNINK': ['Fitness tým'],
+            'POZADÍ A BŘICHO': ['Fitness tým'],
+            'BODY INTERVAL': ['Fitness tým'],
+            'BODY PUMP': ['Fitness tým'],
+            'RANNÍ ENERGIE': ['Fitness tým'],
+            'SM systém': ['Rehabilitační tým'],
+            'FASCIE - ZOGA': ['Joga tým'],
+            'FIT DANCE LATINO': ['Dance tým']
+        };
+
+        // Kategorie typů lekcí
+        const sportCategories = {
+            'Cardio': ['HEAT', 'H.E.A.T.', 'HEAT easy', 'SPINNING', 'SPINNING 90\'', 'HIIT', 'BOOT CAMP', 'WORLD JUMPING'],
+            'Síla': ['PUMPING', 'BODY PUMP', 'BODY FORMING', 'BODY INTERVAL', 'FUNKČNÍ TRÉNINK', 'POZADÍ A BŘICHO', 'CORE', 'BOSU'],
+            'Jóga & Pilates': ['PILATES', 'POWER JOGA', 'JOGA', 'RANNÍ JOGA', 'JOGA A MEDITACE', 'FASCIE - ZOGA'],
+            'Rehabilitace': ['ZDRAVÁ ZÁDA', 'ZDRAVÁ ZÁDA A CORE', 'SM systém', 'RANNÍ ENERGIE'],
+            'Reformer': ['REFORMER'],
+            'Tanec': ['FIT DANCE LATINO']
+        };
+
+        const schedule = {
+            // PONDĚLÍ
+            0: [
+                { time: '6:15', end: '7:05', name: 'HEAT', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Olivová Lenka' },
+                { time: '7:15', end: '8:10', name: 'REFORMER', room: 'Reformer', color: 'var(--reformer)', instructor: 'Reformer tým' },
+                { time: '8:00', end: '8:50', name: 'HEAT', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Vácha Pavel' },
+                { time: '8:30', end: '9:25', name: 'ZDRAVÁ ZÁDA', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Rehabilitační tým' },
+                { time: '9:00', end: '9:50', name: 'SPINNING', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Vácha Pavel' },
+                { time: '9:55', end: '10:50', name: 'REFORMER', room: 'Reformer', color: 'var(--reformer)', instructor: 'Reformer tým' },
+                { time: '9:10', end: '10:05', name: 'HIIT', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Fitness tým' },
+                { time: '9:30', end: '10:25', name: 'PILATES', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Pilates tým' },
+                { time: '10:15', end: '11:10', name: 'REFORMER', room: 'Reformer', color: 'var(--reformer)', instructor: 'Reformer tým' },
+                { time: '10:15', end: '11:10', name: 'BODY FORMING', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Fitness tým' },
+                { time: '16:30', end: '17:25', name: 'POZADÍ A BŘICHO', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Fitness tým' },
+                { time: '17:30', end: '18:20', name: 'SPINNING', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Uhrová Petra' },
+                { time: '17:30', end: '18:25', name: 'POWER JOGA', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Joga tým' },
+                { time: '18:30', end: '19:25', name: 'FUNKČNÍ TRÉNINK', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Fitness tým' },
+                { time: '18:30', end: '19:20', name: 'HEAT', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Olivová Lenka' }
+            ],
+            // ÚTERÝ
+            1: [
+                { time: '6:15', end: '7:10', name: 'PILATES', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Pilates tým' },
+                { time: '8:00', end: '8:50', name: 'HEAT easy', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Olivová Lenka' },
+                { time: '8:10', end: '9:05', name: 'PUMPING', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Vácha Pavel' },
+                { time: '9:00', end: '9:55', name: 'REFORMER', room: 'Reformer', color: 'var(--reformer)', instructor: 'Reformer tým' },
+                { time: '9:50', end: '10:45', name: 'SPINNING', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Vácha Pavel' },
+                { time: '9:15', end: '10:10', name: 'FASCIE - ZOGA', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Joga tým' },
+                { time: '10:15', end: '11:00', name: 'CORE', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Fitness tým' },
+                { time: '16:30', end: '17:25', name: 'POZADÍ A BŘICHO', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Fitness tým' },
+                { time: '16:30', end: '17:20', name: 'HEAT', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Olivová Lenka' },
+                { time: '17:00', end: '17:55', name: 'REFORMER', room: 'Reformer', color: 'var(--reformer)', instructor: 'Reformer tým' },
+                { time: '17:30', end: '18:25', name: 'BOOT CAMP', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Fitness tým' },
+                { time: '17:30', end: '18:20', name: 'SPINNING', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Uhrová Petra' },
+                { time: '17:30', end: '18:25', name: 'BOSU', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Fitness tým' },
+                { time: '18:00', end: '18:55', name: 'REFORMER', room: 'Reformer', color: 'var(--reformer)', instructor: 'Reformer tým' },
+                { time: '18:30', end: '19:25', name: 'ZDRAVÁ ZÁDA A CORE', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Rehabilitační tým' },
+                { time: '18:30', end: '19:20', name: 'HEAT', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Vácha Pavel' },
+                { time: '18:30', end: '19:25', name: 'WORLD JUMPING', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Jumping tým' }
+            ],
+            // STŘEDA
+            2: [
+                { time: '6:15', end: '7:05', name: 'HEAT', room: 'Sál 3', color: 'var(--sal3)', instructor: 'Olivová Lenka' },
+                { time: '7:10', end: '8:05', name: 'REFORMER', room: 'Reformer', color: 'var(--reformer)', instructor: 'Reformer tým' },
+                { time: '8:00', end: '8:50', name: 'RANNÍ ENERGIE', room: 'Sál 3', color: 'var(--sal3)', instructor: 'Fitness tým' },
+                { time: '8:50', end: '9:45', name: 'SPINNING', room: 'Sál 3', color: 'var(--sal3)', instructor: 'Vácha Pavel' },
+                { time: '9:00', end: '9:55', name: 'PILATES', room: 'Sál 3', color: 'var(--sal3)', instructor: 'Pilates tým' },
+                { time: '9:55', end: '10:50', name: 'REFORMER', room: 'Reformer', color: 'var(--reformer)', instructor: 'Reformer tým' },
+                { time: '10:00', end: '10:55', name: 'JOGA', room: 'Sál 3', color: 'var(--sal3)', instructor: 'Joga tým' },
+                { time: '10:15', end: '11:10', name: 'BODY FORMING', room: 'Sál 3', color: 'var(--sal3)', instructor: 'Fitness tým' },
+                { time: '17:00', end: '17:50', name: 'HEAT', room: 'Sál 3', color: 'var(--sal3)', instructor: 'Vácha Pavel' },
+                { time: '17:00', end: '17:55', name: 'REFORMER', room: 'Reformer', color: 'var(--reformer)', instructor: 'Reformer tým' },
+                { time: '17:30', end: '18:25', name: 'BODY INTERVAL', room: 'Sál 3', color: 'var(--sal3)', instructor: 'Fitness tým' },
+                { time: '18:00', end: '18:50', name: 'SPINNING', room: 'Sál 3', color: 'var(--sal3)', instructor: 'Uhrová Petra' },
+                { time: '18:00', end: '18:55', name: 'PILATES', room: 'Sál 3', color: 'var(--sal3)', instructor: 'Pilates tým' }
+            ],
+            // ČTVRTEK
+            3: [
+                { time: '6:15', end: '7:10', name: 'ZDRAVÁ ZÁDA A CORE', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Rehabilitační tým' },
+                { time: '6:15', end: '7:05', name: 'REFORMER', room: 'Reformer', color: 'var(--reformer)', instructor: 'Reformer tým' },
+                { time: '8:00', end: '8:50', name: 'HEAT easy', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Olivová Lenka' },
+                { time: '8:00', end: '8:55', name: 'SM systém', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Rehabilitační tým' },
+                { time: '8:10', end: '9:05', name: 'PUMPING', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Vácha Pavel' },
+                { time: '9:55', end: '10:50', name: 'REFORMER', room: 'Reformer', color: 'var(--reformer)', instructor: 'Reformer tým' },
+                { time: '9:10', end: '10:00', name: 'SPINNING', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Vácha Pavel' },
+                { time: '9:15', end: '10:10', name: 'FASCIE - ZOGA', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Joga tým' },
+                { time: '10:00', end: '10:55', name: 'REFORMER', room: 'Reformer', color: 'var(--reformer)', instructor: 'Reformer tým' },
+                { time: '10:15', end: '11:00', name: 'CORE', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Fitness tým' },
+                { time: '16:30', end: '17:20', name: 'HEAT', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Olivová Lenka' },
+                { time: '17:00', end: '17:55', name: 'FIT DANCE LATINO', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Dance tým' },
+                { time: '17:30', end: '18:20', name: 'SPINNING', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Uhrová Petra' },
+                { time: '18:00', end: '18:55', name: 'POWER JOGA', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Joga tým' },
+                { time: '18:30', end: '19:20', name: 'BODY PUMP', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Fitness tým' },
+                { time: '18:30', end: '19:20', name: 'HEAT', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Vácha Pavel' },
+                { time: '19:00', end: '19:55', name: 'REFORMER', room: 'Reformer', color: 'var(--reformer)', instructor: 'Reformer tým' }
+            ],
+            // PÁTEK
+            4: [
+                { time: '7:10', end: '8:05', name: 'PILATES', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Pilates tým' },
+                { time: '8:00', end: '8:55', name: 'SM systém', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Rehabilitační tým' },
+                { time: '8:30', end: '9:25', name: 'PUMPING', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Vácha Pavel' },
+                { time: '8:30', end: '9:20', name: 'HEAT', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Olivová Lenka' },
+                { time: '9:30', end: '10:20', name: 'SPINNING', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Vácha Pavel' },
+                { time: '9:55', end: '10:50', name: 'REFORMER', room: 'Reformer', color: 'var(--reformer)', instructor: 'Reformer tým' },
+                { time: '16:30', end: '18:00', name: 'SPINNING 90\'', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Uhrová Petra' }
+            ],
+            // SOBOTA
+            5: [
+                { time: '8:30', end: '9:25', name: 'PUMPING', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Vácha Pavel' },
+                { time: '8:30', end: '9:20', name: 'HEAT', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Olivová Lenka' },
+                { time: '9:30', end: '10:20', name: 'SPINNING', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Vácha Pavel' },
+                { time: '16:30', end: '18:00', name: 'SPINNING 90\'', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Uhrová Petra' },
+                { time: '17:30', end: '18:50', name: 'REFORMER', room: 'Reformer', color: 'var(--reformer)', instructor: 'Reformer tým' },
+                { time: '18:00', end: '18:50', name: 'SPINNING', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Vácha Pavel' },
+                { time: '19:00', end: '19:55', name: 'JOGA A MEDITACE', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Joga tým' },
+                { time: '19:00', end: '19:55', name: 'HIIT', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Fitness tým' }
+            ],
+            // NEDĚLE
+            6: [
+                { time: '8:30', end: '9:25', name: 'ZDRAVÁ ZÁDA', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Rehabilitační tým' },
+                { time: '9:30', end: '10:25', name: 'RANNÍ JOGA', room: 'Sál 1', color: 'var(--sal1)', instructor: 'Joga tým' },
+                { time: '10:20', end: '11:10', name: 'SPINNING', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Vácha Pavel' },
+                { time: '11:20', end: '12:10', name: 'HEAT', room: 'Sál 2', color: 'var(--sal2)', instructor: 'Olivová Lenka' },
+                { time: '11:25', end: '12:20', name: 'REFORMER', room: 'Reformer', color: 'var(--reformer)', instructor: 'Reformer tým' }
+            ]
+        };
+
+        const dayNames = ['Pondělí', 'Úterý', 'Středa', 'Čtvrtek', 'Pátek', 'Sobota', 'Neděle'];
+        const dayNamesShort = ['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne'];
+
+        let currentDay = new Date().getDay();
+        currentDay = currentDay === 0 ? 6 : currentDay - 1; // Convert to Monday = 0
+
+        let currentView = 'day';
+        let isLoggedIn = false;
+        let myReservations = JSON.parse(localStorage.getItem('z4y_reservations') || '[]');
+        let selectedLesson = null;
+
+        // Active filters
+        let activeRoomFilter = 'all';
+        let activeSportFilter = 'all';
+
+        // Initialize
+        function init() {
+            renderDaySelector();
+            renderSportFilterChips();
+            renderDayView();
+            renderWeekView();
+            updateLoginState();
+        }
+
+        // Render sport filter chips
+        function renderSportFilterChips() {
+            const container = document.getElementById('sportFilter');
+            const categories = ['all', ...Object.keys(sportCategories)];
+
+            container.innerHTML = categories.map(cat => `
+                <button class="filter-chip ${cat === 'all' ? 'active' : ''}"
+                        data-sport="${cat}"
+                        onclick="filterBySport('${cat}', this)">
+                    ${cat === 'all' ? 'Všechny' : cat}
+                </button>
+            `).join('');
+        }
+
+        // Filter by room
+        function filterByRoom(room, element) {
+            activeRoomFilter = room;
+            document.querySelectorAll('.legend-item').forEach(el => el.classList.remove('active'));
+            element.classList.add('active');
+            renderDayView();
+            renderWeekView();
+        }
+
+        // Filter by sport type
+        function filterBySport(sport, element) {
+            activeSportFilter = sport;
+            document.querySelectorAll('.filter-chip').forEach(el => el.classList.remove('active'));
+            element.classList.add('active');
+            renderDayView();
+            renderWeekView();
+        }
+
+        // Reset all filters
+        function resetFilters() {
+            activeRoomFilter = 'all';
+            activeSportFilter = 'all';
+
+            document.querySelectorAll('.legend-item').forEach(el => el.classList.remove('active'));
+            document.querySelector('.legend-item[data-room="all"]').classList.add('active');
+
+            document.querySelectorAll('.filter-chip').forEach(el => el.classList.remove('active'));
+            document.querySelector('.filter-chip[data-sport="all"]').classList.add('active');
+
+            renderDayView();
+            renderWeekView();
+        }
+
+        // Get filtered lessons
+        function getFilteredLessons(lessons) {
+            return lessons.filter(lesson => {
+                // Room filter
+                if (activeRoomFilter !== 'all' && lesson.room !== activeRoomFilter) {
+                    return false;
+                }
+
+                // Sport filter
+                if (activeSportFilter !== 'all') {
+                    const sportsInCategory = sportCategories[activeSportFilter] || [];
+                    if (!sportsInCategory.includes(lesson.name)) {
+                        return false;
+                    }
+                }
+
+                return true;
+            });
+        }
+
+        // Render day selector buttons
+        function renderDaySelector() {
+            const selector = document.getElementById('daySelector');
+            const today = new Date().getDay();
+            const todayIndex = today === 0 ? 6 : today - 1;
+
+            selector.innerHTML = dayNamesShort.map((name, i) => `
+                <button class="day-btn ${i === currentDay ? 'active' : ''} ${i === todayIndex ? 'today' : ''}"
+                        onclick="selectDay(${i}, this)">
+                    ${name}
+                </button>
+            `).join('');
+        }
+
+        // Select day
+        function selectDay(dayIndex, btn) {
+            currentDay = dayIndex;
+            document.querySelectorAll('.day-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            renderDayView();
+        }
+
+        // Set view (day/week)
+        function setView(view, btn) {
+            currentView = view;
+            document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            document.getElementById('dayView').classList.toggle('active', view === 'day');
+            document.getElementById('weekView').classList.toggle('active', view === 'week');
+            document.querySelector('.day-selector').style.display = view === 'day' ? 'flex' : 'none';
+        }
+
+        // Render day view
+        function renderDayView() {
+            const container = document.getElementById('dayView');
+            const allLessons = schedule[currentDay] || [];
+            const lessons = getFilteredLessons(allLessons);
+
+            // Sort by time
+            const sorted = [...lessons].sort((a, b) => {
+                const [aH, aM] = a.time.split(':').map(Number);
+                const [bH, bM] = b.time.split(':').map(Number);
+                return (aH * 60 + aM) - (bH * 60 + bM);
+            });
+
+            // Group by time of day
+            const morning = sorted.filter(l => parseInt(l.time) < 12);
+            const afternoon = sorted.filter(l => parseInt(l.time) >= 12 && parseInt(l.time) < 17);
+            const evening = sorted.filter(l => parseInt(l.time) >= 17);
+
+            let html = '';
+
+            if (morning.length > 0) {
+                html += `<div class="time-group">
+                    <div class="time-group-header">🌅 Ráno (6:00 - 12:00)</div>
+                    ${morning.map(l => createLessonRow(l)).join('')}
+                </div>`;
+            }
+
+            if (afternoon.length > 0) {
+                html += `<div class="time-group">
+                    <div class="time-group-header">☀️ Odpoledne (12:00 - 17:00)</div>
+                    ${afternoon.map(l => createLessonRow(l)).join('')}
+                </div>`;
+            }
+
+            if (evening.length > 0) {
+                html += `<div class="time-group">
+                    <div class="time-group-header">🌙 Večer (17:00 - 21:00)</div>
+                    ${evening.map(l => createLessonRow(l)).join('')}
+                </div>`;
+            }
+
+            if (html === '') {
+                html = `<div class="empty-state">
+                    <div class="empty-state-icon">🧘</div>
+                    <h3>Žádné lekce</h3>
+                    <p>V tento den nejsou naplánovány žádné lekce.</p>
+                </div>`;
+            }
+
+            container.innerHTML = html;
+        }
+
+        // Create lesson row HTML
+        function createLessonRow(lesson) {
+            const spots = Math.floor(Math.random() * 8) + 2;
+            const maxSpots = 12;
+            const isFull = spots >= maxSpots - 1;
+            const isFew = spots >= maxSpots - 3;
+
+            let statusClass = 'status-available';
+            let statusText = `${spots}/${maxSpots} míst`;
+            if (isFull) {
+                statusClass = 'status-full';
+                statusText = 'Plno';
+            } else if (isFew) {
+                statusClass = 'status-few';
+                statusText = `${spots}/${maxSpots} míst`;
+            }
+
+            const instructor = lesson.instructor || 'Neuvedeno';
+
+            return `
+                <div class="lesson-row" onclick="openLessonModal('${lesson.name}', '${lesson.time}', '${lesson.end}', '${lesson.room}', ${currentDay}, '${instructor}')">
+                    <span class="lesson-time">${lesson.time}</span>
+                    <div class="lesson-info" style="border-left-color: ${lesson.color};">
+                        <div class="lesson-name">${lesson.name}</div>
+                        <div class="lesson-meta">${lesson.room} • ${lesson.time} - ${lesson.end} • ${instructor}</div>
+                    </div>
+                    <span class="lesson-status ${statusClass}">${statusText}</span>
+                </div>
+            `;
+        }
+
+        // Render week view
+        function renderWeekView() {
+            const container = document.getElementById('weekView');
+            const today = new Date().getDay();
+            const todayIndex = today === 0 ? 6 : today - 1;
+
+            let html = '<table class="week-table"><thead><tr><th></th>';
+            dayNamesShort.forEach((name, i) => {
+                html += `<th class="${i === todayIndex ? 'today-col' : ''}">${name}</th>`;
+            });
+            html += '</tr></thead><tbody>';
+
+            // Time slots from 6:00 to 20:00
+            for (let hour = 6; hour <= 20; hour++) {
+                html += `<tr><td>${hour}:00</td>`;
+                for (let day = 0; day < 7; day++) {
+                    const allLessons = (schedule[day] || []).filter(l => {
+                        const h = parseInt(l.time.split(':')[0]);
+                        return h === hour;
+                    });
+                    const lessons = getFilteredLessons(allLessons);
+                    html += `<td class="${day === todayIndex ? 'today-col' : ''}">`;
+                    lessons.forEach(l => {
+                        const instructor = l.instructor || '';
+                        html += `<div class="week-lesson" style="background: ${l.color};"
+                                      onclick="openLessonModal('${l.name}', '${l.time}', '${l.end}', '${l.room}', ${day}, '${instructor}')"
+                                      title="${l.name} - ${instructor}">
+                            <div class="week-lesson-name">${l.name}</div>
+                            <div class="week-lesson-time">${l.time}</div>
+                        </div>`;
+                    });
+                    html += '</td>';
+                }
+                html += '</tr>';
+            }
+
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+
+        // Open lesson modal
+        function openLessonModal(name, time, end, room, day, instructor = '') {
+            selectedLesson = { name, time, end, room, day, instructor };
+
+            document.getElementById('modalTitle').textContent = name;
+            document.getElementById('modalTime').textContent = `${time} - ${end}`;
+            document.getElementById('modalRoom').textContent = room;
+            document.getElementById('modalDay').textContent = dayNames[day];
+
+            // Set instructor info with photo
+            const instructorName = instructor || 'Neuvedeno';
+            document.getElementById('modalInstructorName').textContent = instructorName;
+
+            // Get instructor specialization
+            const specialization = instructorSpecializations[instructor] || 'Instruktor';
+            document.getElementById('modalInstructorSpecialization').textContent = specialization;
+
+            // Set instructor photo
+            const photoContainer = document.getElementById('modalInstructorPhotoContainer');
+            const photoUrl = instructorPhotos[instructor];
+            if (photoUrl) {
+                photoContainer.innerHTML = `<img src="${photoUrl}" alt="${instructorName}" class="modal-instructor-photo" onerror="this.parentElement.innerHTML='👤'">`;
+            } else {
+                photoContainer.innerHTML = '👤';
+                photoContainer.className = 'modal-instructor-photo-placeholder';
+            }
+
+            // Set lesson description
+            const description = lessonDescriptions[name] || 'Skupinová lekce v Zone4You fitness klubu.';
+            document.getElementById('modalDescription').textContent = description;
+
+            const spots = Math.floor(Math.random() * 8) + 2;
+            document.getElementById('modalSpots').textContent = `${spots}/12`;
+
+            document.getElementById('lessonModal').classList.add('open');
+        }
+
+        // Close modal
+        function closeModal() {
+            document.getElementById('lessonModal').classList.remove('open');
+            selectedLesson = null;
+        }
+
+        // Book lesson
+        function bookLesson() {
+            if (!isLoggedIn) {
+                showToast('Pro rezervaci se prosím přihlaste', true);
+                closeModal();
+                return;
+            }
+
+            if (selectedLesson) {
+                const reservation = {
+                    id: Date.now(),
+                    ...selectedLesson,
+                    bookedAt: new Date().toISOString()
+                };
+                myReservations.push(reservation);
+                localStorage.setItem('z4y_reservations', JSON.stringify(myReservations));
+                showToast(`Rezervováno: ${selectedLesson.name} - ${dayNames[selectedLesson.day]} ${selectedLesson.time}`);
+                closeModal();
+            }
+        }
+
+        // Show my reservations
+        function showMyReservations() {
+            document.getElementById('scheduleSection').style.display = 'none';
+            document.getElementById('myReservations').classList.add('active');
+            renderMyReservations();
+        }
+
+        // Show schedule
+        function showSchedule() {
+            document.getElementById('scheduleSection').style.display = 'block';
+            document.getElementById('myReservations').classList.remove('active');
+        }
+
+        // Render my reservations
+        function renderMyReservations() {
+            const container = document.getElementById('reservationsList');
+
+            if (!isLoggedIn) {
+                container.innerHTML = `<div class="empty-state">
+                    <div class="empty-state-icon">🔐</div>
+                    <h3>Přihlaste se</h3>
+                    <p>Pro zobrazení rezervací se prosím přihlaste.</p>
+                    <button class="btn btn-primary" onclick="toggleLogin()">Přihlásit se</button>
+                </div>`;
+                return;
+            }
+
+            if (myReservations.length === 0) {
+                container.innerHTML = `<div class="empty-state">
+                    <div class="empty-state-icon">📅</div>
+                    <h3>Žádné rezervace</h3>
+                    <p>Zatím nemáte žádné rezervace.</p>
+                    <button class="btn btn-primary" onclick="showSchedule()">Zobrazit rozvrh</button>
+                </div>`;
+                return;
+            }
+
+            container.innerHTML = myReservations.map(r => `
+                <div class="reservation-card">
+                    <div class="reservation-info">
+                        <h4>${r.name}</h4>
+                        <p>${dayNames[r.day]} • ${r.time} - ${r.end} • ${r.room}</p>
+                    </div>
+                    <button class="btn-cancel" onclick="cancelReservation(${r.id})">Zrušit</button>
+                </div>
+            `).join('');
+        }
+
+        // Cancel reservation
+        function cancelReservation(id) {
+            myReservations = myReservations.filter(r => r.id !== id);
+            localStorage.setItem('z4y_reservations', JSON.stringify(myReservations));
+            showToast('Rezervace byla zrušena');
+            renderMyReservations();
+        }
+
+        // Toggle login
+        function toggleLogin() {
+            isLoggedIn = !isLoggedIn;
+            updateLoginState();
+            if (isLoggedIn) {
+                showToast('Přihlášení úspěšné');
+            } else {
+                showToast('Odhlášeno');
+            }
+        }
+
+        // Update login state UI
+        function updateLoginState() {
+            const btn = document.getElementById('loginBtn');
+            btn.textContent = isLoggedIn ? 'Odhlásit se' : 'Přihlásit se';
+            btn.classList.toggle('btn-outline', isLoggedIn);
+            btn.classList.toggle('btn-primary', !isLoggedIn);
+        }
+
+        // Show toast
+        function showToast(message, isError = false) {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${isError ? 'error' : ''}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeModal();
+        });
+
+        // Click outside modal to close
+        document.getElementById('lessonModal').addEventListener('click', (e) => {
+            if (e.target.classList.contains('modal-overlay')) closeModal();
+        });
+
+        // Initialize on load
+        init();
+    </script>
+</body>
 </html>

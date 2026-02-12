@@ -3,26 +3,53 @@ import React, { useState, useEffect, useMemo } from 'react';
 const SUPABASE_URL = 'https://oonnawrfsbsbuijmfcqj.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9vbm5hd3Jmc2JzYnVpam1mY3FqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzMjA4ODcsImV4cCI6MjA4NTg5Njg4N30.d1jk1BYOc6eEx-KJzGpW3ekfDs4jxW10VgKmLef8f1Y';
 
+const LOADING_MESSAGES = [
+  "🔧 Stavím regál...",
+  "📦 Skládám police...",
+  "🏗️ Montuji nosníky...",
+  "📐 Měřím rozteče...",
+  "🔩 Šroubuju šrouby...",
+  "🇨🇳 Nakupuji v Číně...",
+  "📞 Volám dodavateli...",
+  "💰 Počítám marži...",
+  "🚚 Čekám na DPD...",
+  "📊 Analyzuji data...",
+  "☕ Dávám si kafe...",
+  "🚀 Stavím impérium...",
+  "🧮 Učím se počítat...",
+  "🤔 Přemýšlím...",
+  "💪 Makám na tom...",
+  "🎯 Míříme na měsíc...",
+  "🔮 Věštím z dat...",
+  "🏋️ Zvedám těžká data...",
+  "🧹 Uklízím sklad...",
+  "🎪 Cirkus začíná...",
+  "📈 Rosteme!",
+  "🌟 Děláme zázraky...",
+  "🏆 Jdeme na to...",
+  "⚡ Nabíjím energii...",
+  "✨ Zázraky na počkání...",
+  "🤯 Snažím se rozumět Michalovi...",
+];
+
 const DAYS = ['Ne', 'Po', 'Út', 'St', 'Čt', 'Pá', 'So'];
 const DAYS_FULL = ['Neděle', 'Pondělí', 'Úterý', 'Středa', 'Čtvrtek', 'Pátek', 'Sobota'];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const CURRENCY_RATES = { CZK: 1, EUR: 25.2, HUF: 0.063 };
 
-// Velká města = krajská města a města nad 50 000 obyvatel
 const BIG_CITIES = {
   cz: ['praha', 'brno', 'ostrava', 'plzeň', 'plzen', 'liberec', 'olomouc', 'budějovic', 'budejovic', 'hradec králové', 'hradec', 'ústí nad labem', 'usti', 'pardubice', 'zlín', 'zlin', 'havířov', 'havirov', 'kladno', 'most', 'opava', 'frýdek', 'frydek', 'karviná', 'karvina', 'jihlava', 'teplice', 'děčín', 'decin', 'karlovy vary'],
   sk: ['bratislava', 'košice', 'kosice', 'prešov', 'presov', 'žilina', 'zilina', 'nitra', 'banská bystrica', 'bystrica', 'trnava', 'martin', 'trenčín', 'trencin', 'poprad'],
   hu: ['budapest', 'debrecen', 'szeged', 'miskolc', 'pécs', 'pecs', 'győr', 'gyor', 'nyíregyháza', 'nyiregyhaza', 'kecskemét', 'kecskemet', 'székesfehérvár', 'szekesfehervar'],
 };
 
-// Agregace městských částí do hlavního města
 const CITY_AGGREGATION = {
-  'praha': /^praha\s*\d*/i,
-  'brno': /^brno\s*[-–]\s*/i,
-  'ostrava': /^ostrava\s*[-–]\s*/i,
-  'budapest': /^budapest\s*/i,
-  'bratislava': /^bratislava\s*/i,
-  'košice': /^košice\s*/i,
+  'Praha': /^praha\s*\d*/i,
+  'Brno': /^brno\s*[-–]\s*/i,
+  'Ostrava': /^ostrava\s*[-–]\s*/i,
+  'Budapest': /^budapest\s*/i,
+  'Bratislava': /^bratislava\s*/i,
+  'Košice': /^košice\s*/i,
 };
 
 const normalizeCity = (city) => (city || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
@@ -31,7 +58,7 @@ const aggregateCity = (city) => {
   const normalized = (city || '').trim();
   for (const [mainCity, pattern] of Object.entries(CITY_AGGREGATION)) {
     if (pattern.test(normalized)) {
-      return mainCity.charAt(0).toUpperCase() + mainCity.slice(1);
+      return mainCity;
     }
   }
   return normalized || 'Neznámé';
@@ -43,7 +70,18 @@ const isBigCity = (city, market) => {
 };
 
 const isB2B = (order) => order.raw_data?.customer?.company_yn === true || order.raw_data?.customer?.company_yn === 'true';
-const getRevenueCZK = (order) => parseFloat(order.raw_data?.order_total || 0) * (CURRENCY_RATES[order.currency] || 1);
+
+// Výpočet obratu BEZ DPH a BEZ poštovného
+const getRevenueWithoutVAT = (order) => {
+  const products = order.raw_data?.products || [];
+  let total = 0;
+  products.forEach(p => {
+    total += parseFloat(p.price_without_vat || 0) * (p.quantity || 1);
+  });
+  // Převod měny
+  const currency = order.currency || 'CZK';
+  return total * (CURRENCY_RATES[currency] || 1);
+};
 
 const formatNumber = (num) => Math.round(num).toLocaleString('cs-CZ');
 const formatCurrency = (num) => `${formatNumber(num)} Kč`;
@@ -54,7 +92,6 @@ const getColorIntensity = (value, max) => {
   return i < 0.2 ? 'bg-blue-100' : i < 0.4 ? 'bg-blue-200' : i < 0.6 ? 'bg-blue-300' : i < 0.8 ? 'bg-blue-400' : 'bg-blue-500';
 };
 
-// Date presets
 const getDatePreset = (preset) => {
   const today = new Date();
   const formatDate = (d) => d.toISOString().split('T')[0];
@@ -106,12 +143,68 @@ const KPICard = ({ title, value, icon, sub }) => (
   </div>
 );
 
-const Heatmap = ({ data, metric, onClick }) => {
+const Heatmap = ({ data, metric, onClick, groupDays, activeDays }) => {
   const max = useMemo(() => {
     let m = 0;
-    for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) m = Math.max(m, data[d]?.[h]?.[metric] || 0);
+    if (groupDays) {
+      for (let h = 0; h < 24; h++) m = Math.max(m, data.grouped?.[h]?.[metric] || 0);
+    } else {
+      for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) m = Math.max(m, data[d]?.[h]?.[metric] || 0);
+    }
     return m;
-  }, [data, metric]);
+  }, [data, metric, groupDays]);
+
+  // Výpočet hodnot pro legendu
+  const legendValues = useMemo(() => {
+    if (!max) return [0, 0, 0, 0, 0];
+    return [
+      Math.round(max * 0.2),
+      Math.round(max * 0.4),
+      Math.round(max * 0.6),
+      Math.round(max * 0.8),
+      Math.round(max)
+    ];
+  }, [max]);
+
+  const formatLegendValue = (val) => {
+    if (metric === 'orders') return val;
+    if (metric === 'aov' || metric === 'revenue') return `${formatNumber(val)}`;
+    return val;
+  };
+
+  if (groupDays) {
+    return (
+      <div className="overflow-x-auto">
+        <div className="min-w-[600px]">
+          <div className="flex">
+            <div className="w-16" />
+            {HOURS.map(h => (
+              <div key={h} className="flex-1 text-center text-[10px] text-slate-400">{h}</div>
+            ))}
+          </div>
+          <div className="flex items-center">
+            <div className="w-16 text-xs text-slate-500 font-medium">Celkem</div>
+            {HOURS.map(h => (
+              <div 
+                key={h} 
+                onClick={() => onClick(null, h, data.grouped?.[h])}
+                className={`flex-1 aspect-square m-0.5 rounded cursor-pointer transition-all hover:ring-2 hover:ring-blue-400 hover:scale-110 ${getColorIntensity(data.grouped?.[h]?.[metric], max)}`} 
+              />
+            ))}
+          </div>
+          <div className="flex items-center justify-end mt-3 gap-1 text-[9px] text-slate-400">
+            <span>0</span>
+            {legendValues.map((val, i) => (
+              <React.Fragment key={i}>
+                <div className={`w-4 h-4 rounded ${['bg-blue-100', 'bg-blue-200', 'bg-blue-300', 'bg-blue-400', 'bg-blue-500'][i]}`}></div>
+                <span>{formatLegendValue(val)}</span>
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="overflow-x-auto">
@@ -122,33 +215,40 @@ const Heatmap = ({ data, metric, onClick }) => {
             <div key={h} className="flex-1 text-center text-[10px] text-slate-400">{h}</div>
           ))}
         </div>
-        {[1,2,3,4,5,6,0].map(d => (
-          <div key={d} className="flex items-center">
-            <div className="w-10 text-xs text-slate-500 font-medium">{DAYS[d]}</div>
-            {HOURS.map(h => (
-              <div 
-                key={h} 
-                onClick={() => onClick(d, h, data[d]?.[h])}
-                className={`flex-1 aspect-square m-0.5 rounded cursor-pointer transition-all hover:ring-2 hover:ring-blue-400 hover:scale-110 ${getColorIntensity(data[d]?.[h]?.[metric], max)}`} 
-              />
-            ))}
-          </div>
-        ))}
-        <div className="flex items-center justify-end mt-3 gap-1 text-xs text-slate-400">
-          <span>Méně</span>
-          <div className="w-4 h-4 bg-blue-100 rounded"></div>
-          <div className="w-4 h-4 bg-blue-200 rounded"></div>
-          <div className="w-4 h-4 bg-blue-300 rounded"></div>
-          <div className="w-4 h-4 bg-blue-400 rounded"></div>
-          <div className="w-4 h-4 bg-blue-500 rounded"></div>
-          <span>Více</span>
+        {[1,2,3,4,5,6,0].map(d => {
+          const isActive = activeDays.has(d);
+          return (
+            <div key={d} className={`flex items-center ${!isActive ? 'opacity-30' : ''}`}>
+              <div className="w-10 text-xs text-slate-500 font-medium">{DAYS[d]}</div>
+              {HOURS.map(h => (
+                <div 
+                  key={h} 
+                  onClick={() => isActive && onClick(d, h, data[d]?.[h])}
+                  className={`flex-1 aspect-square m-0.5 rounded transition-all ${
+                    isActive 
+                      ? `cursor-pointer hover:ring-2 hover:ring-blue-400 hover:scale-110 ${getColorIntensity(data[d]?.[h]?.[metric], max)}`
+                      : 'bg-slate-50'
+                  }`} 
+                />
+              ))}
+            </div>
+          );
+        })}
+        <div className="flex items-center justify-end mt-3 gap-1 text-[9px] text-slate-400">
+          <span>0</span>
+          {legendValues.map((val, i) => (
+            <React.Fragment key={i}>
+              <div className={`w-4 h-4 rounded ${['bg-blue-100', 'bg-blue-200', 'bg-blue-300', 'bg-blue-400', 'bg-blue-500'][i]}`}></div>
+              <span>{formatLegendValue(val)}</span>
+            </React.Fragment>
+          ))}
         </div>
       </div>
     </div>
   );
 };
 
-const CompareCard = ({ t1, v1, c1, t2, v2, c2, i1, i2, u = 'Kč', desc1, desc2 }) => {
+const CompareCard = ({ t1, v1, c1, t2, v2, c2, i1, i2, desc1, desc2 }) => {
   const w = v1 > v2 ? 1 : 2;
   return (
     <div className="grid grid-cols-2 gap-3">
@@ -194,6 +294,29 @@ const DatePresetButton = ({ label, active, onClick }) => (
   </button>
 );
 
+const LoadingOverlay = ({ message }) => (
+  <div className="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 flex items-center justify-center">
+    <div className="text-center">
+      <div className="relative w-16 h-16 mx-auto mb-4">
+        <div className="absolute inset-0 border-4 border-blue-200 rounded-full"></div>
+        <div className="absolute inset-0 border-4 border-blue-500 rounded-full border-t-transparent animate-spin"></div>
+      </div>
+      <p className="text-lg font-medium text-slate-700 animate-pulse">{message}</p>
+      <div className="mt-3 w-48 h-2 bg-slate-200 rounded-full mx-auto overflow-hidden">
+        <div className="h-full bg-blue-500 rounded-full animate-[loading_1.5s_ease-in-out_infinite]" 
+          style={{ width: '30%', animation: 'loading 1.5s ease-in-out infinite' }}></div>
+      </div>
+    </div>
+    <style>{`
+      @keyframes loading {
+        0% { width: 0%; margin-left: 0%; }
+        50% { width: 60%; margin-left: 20%; }
+        100% { width: 0%; margin-left: 100%; }
+      }
+    `}</style>
+  </div>
+);
+
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -202,13 +325,24 @@ export default function App() {
   const [metric, setMetric] = useState('orders');
   const [tab, setTab] = useState('heatmap');
   const [cell, setCell] = useState(null);
+  const [groupDays, setGroupDays] = useState(false);
   const [activePreset, setActivePreset] = useState('last_30');
+  const [loadingMessage, setLoadingMessage] = useState(LOADING_MESSAGES[0]);
   const [dateFrom, setDateFrom] = useState(() => { 
     const d = new Date(); 
     d.setDate(d.getDate() - 30); 
     return d.toISOString().split('T')[0]; 
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0]);
+
+  // Rotate loading messages
+  useEffect(() => {
+    if (!loading) return;
+    const interval = setInterval(() => {
+      setLoadingMessage(LOADING_MESSAGES[Math.floor(Math.random() * LOADING_MESSAGES.length)]);
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [loading]);
 
   const applyPreset = (preset) => {
     const dates = getDatePreset(preset);
@@ -228,6 +362,7 @@ export default function App() {
   useEffect(() => {
     setLoading(true);
     setError(null);
+    setLoadingMessage(LOADING_MESSAGES[Math.floor(Math.random() * LOADING_MESSAGES.length)]);
     
     async function fetchAllOrders() {
       let allOrders = [];
@@ -266,11 +401,23 @@ export default function App() {
 
   const filtered = useMemo(() => country === 'all' ? orders : orders.filter(o => o.market === country), [orders, country]);
 
+  // Zjisti které dny jsou aktivní (mají data)
+  const activeDays = useMemo(() => {
+    const days = new Set();
+    filtered.forEach(o => {
+      if (o.order_date) {
+        const dt = new Date(o.order_date);
+        days.add(dt.getDay());
+      }
+    });
+    return days;
+  }, [filtered]);
+
   const kpis = useMemo(() => {
     let cnt = 0, rev = 0, b2b = 0, big = 0;
     filtered.forEach(o => { 
       cnt++; 
-      rev += getRevenueCZK(o); 
+      rev += getRevenueWithoutVAT(o); 
       if (isB2B(o)) b2b++; 
       if (isBigCity(o.raw_data?.customer?.city_invoice, o.market)) big++; 
     });
@@ -289,17 +436,28 @@ export default function App() {
       d[day] = {}; 
       for (let h = 0; h < 24; h++) d[day][h] = { orders: 0, revenue: 0, aov: 0 }; 
     }
+    // Grouped by hour only
+    d.grouped = {};
+    for (let h = 0; h < 24; h++) d.grouped[h] = { orders: 0, revenue: 0, aov: 0 };
+    
     filtered.forEach(o => {
       if (!o.order_date) return;
-      const dt = new Date(o.order_date), day = dt.getDay(), h = dt.getHours(), r = getRevenueCZK(o);
+      const dt = new Date(o.order_date), day = dt.getDay(), h = dt.getHours(), r = getRevenueWithoutVAT(o);
       d[day][h].orders++; 
       d[day][h].revenue += r;
+      d.grouped[h].orders++;
+      d.grouped[h].revenue += r;
     });
+    
     for (let day = 0; day < 7; day++) {
       for (let h = 0; h < 24; h++) {
         d[day][h].aov = d[day][h].orders ? d[day][h].revenue / d[day][h].orders : 0;
       }
     }
+    for (let h = 0; h < 24; h++) {
+      d.grouped[h].aov = d.grouped[h].orders ? d.grouped[h].revenue / d.grouped[h].orders : 0;
+    }
+    
     return d;
   }, [filtered]);
 
@@ -309,7 +467,7 @@ export default function App() {
     filtered.forEach(o => {
       const rawCity = o.raw_data?.customer?.city_invoice || '';
       const city = aggregateCity(rawCity);
-      const r = getRevenueCZK(o);
+      const r = getRevenueWithoutVAT(o);
       const big = isBigCity(rawCity, o.market);
       
       if (big) { bigC.o++; bigC.r += r; } else { smallC.o++; smallC.r += r; }
@@ -333,7 +491,7 @@ export default function App() {
   const b2bStats = useMemo(() => {
     let b2b = { o: 0, r: 0 }, b2c = { o: 0, r: 0 };
     filtered.forEach(o => { 
-      const r = getRevenueCZK(o); 
+      const r = getRevenueWithoutVAT(o); 
       if (isB2B(o)) { b2b.o++; b2b.r += r; } else { b2c.o++; b2c.r += r; } 
     });
     return { 
@@ -342,7 +500,6 @@ export default function App() {
     };
   }, [filtered]);
 
-  // Generate insights
   const geoInsight = useMemo(() => {
     const diff = Math.abs(geoStats.big.aov - geoStats.small.aov);
     const pctDiff = geoStats.small.aov ? ((geoStats.big.aov - geoStats.small.aov) / geoStats.small.aov * 100).toFixed(0) : 0;
@@ -386,15 +543,6 @@ export default function App() {
     }
   }, [b2bStats]);
 
-  if (loading) return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
-      <div className="text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto" />
-        <p className="mt-4 text-slate-500">Načítám data ze Supabase...</p>
-      </div>
-    </div>
-  );
-
   if (error) return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
       <div className="text-center bg-white p-8 rounded-2xl shadow-lg">
@@ -407,12 +555,14 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 md:p-6">
+      {loading && <LoadingOverlay message={loadingMessage} />}
+      
       <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 gap-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-800">📊 Order Analytics</h1>
-            <p className="text-slate-500 text-sm">REGAL MASTER - Analýza objednávek</p>
+            <p className="text-slate-500 text-sm">REGAL MASTER - Analýza objednávek (bez DPH a poštovného)</p>
           </div>
         </div>
 
@@ -472,7 +622,7 @@ export default function App() {
         {/* KPIs */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           <KPICard title="Objednávky" value={formatNumber(kpis.orders)} icon="🛒" />
-          <KPICard title="Obrat" value={formatCurrency(kpis.revenue)} icon="💰" />
+          <KPICard title="Obrat (bez DPH)" value={formatCurrency(kpis.revenue)} icon="💰" />
           <KPICard title="Ø Objednávka" value={formatCurrency(kpis.aov)} icon="📦" />
           <KPICard title="B2B podíl" value={`${kpis.b2bPct.toFixed(0)}%`} icon="🏢" sub={`🏙️ Velká města: ${kpis.bigPct.toFixed(0)}%`} />
         </div>
@@ -504,34 +654,52 @@ export default function App() {
             <>
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-4">
                 <div>
-                  <h2 className="text-lg font-semibold text-slate-800">Heatmapa: Den × Hodina</h2>
+                  <h2 className="text-lg font-semibold text-slate-800">Heatmapa: {groupDays ? 'Hodiny (seskupené)' : 'Den × Hodina'}</h2>
                   <p className="text-sm text-slate-500">Klikni na buňku pro detail</p>
                 </div>
-                <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">
-                  {[
-                    { c: 'orders', l: 'Objednávky' }, 
-                    { c: 'revenue', l: 'Obrat' }, 
-                    { c: 'aov', l: 'AOV' }
-                  ].map(m => (
-                    <button 
-                      key={m.c} 
-                      onClick={() => setMetric(m.c)}
-                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                        metric === m.c 
-                          ? 'bg-white shadow text-slate-800' 
-                          : 'text-slate-500 hover:text-slate-700'
-                      }`}
-                    >
-                      {m.l}
-                    </button>
-                  ))}
+                <div className="flex gap-2 items-center">
+                  <button
+                    onClick={() => setGroupDays(!groupDays)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      groupDays 
+                        ? 'bg-purple-500 text-white shadow-sm' 
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {groupDays ? '📊 Seskupené' : '📅 Po dnech'}
+                  </button>
+                  <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">
+                    {[
+                      { c: 'orders', l: 'Objednávky' }, 
+                      { c: 'revenue', l: 'Obrat' }, 
+                      { c: 'aov', l: 'AOV' }
+                    ].map(m => (
+                      <button 
+                        key={m.c} 
+                        onClick={() => setMetric(m.c)}
+                        className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                          metric === m.c 
+                            ? 'bg-white shadow text-slate-800' 
+                            : 'text-slate-500 hover:text-slate-700'
+                        }`}
+                      >
+                        {m.l}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
-              <Heatmap data={heatmap} metric={metric} onClick={(d, h, data) => setCell({ d, h, data })} />
+              <Heatmap 
+                data={heatmap} 
+                metric={metric} 
+                onClick={(d, h, data) => setCell({ d, h, data })} 
+                groupDays={groupDays}
+                activeDays={activeDays}
+              />
               {cell && (
                 <div className="mt-4 p-4 bg-blue-50 rounded-xl border border-blue-200">
                   <div className="font-semibold text-blue-800 mb-2">
-                    {DAYS_FULL[cell.d]} {cell.h}:00 - {cell.h}:59
+                    {cell.d !== null ? `${DAYS_FULL[cell.d]} ` : ''}{cell.h}:00 - {cell.h}:59
                   </div>
                   <div className="grid grid-cols-3 gap-4 text-sm">
                     <div>
@@ -556,14 +724,14 @@ export default function App() {
             <>
               <h2 className="text-lg font-semibold text-slate-800 mb-2">🏙️ Velká města vs 🏘️ Menší města</h2>
               <p className="text-sm text-slate-500 mb-4">
-                <strong>Velká města</strong> = krajská města + města nad 50 000 obyvatel (Praha, Brno, Ostrava, Plzeň, Liberec, Olomouc, Hradec Králové, Ústí n.L., Pardubice, České Budějovice, Zlín, Havířov, Kladno...)<br/>
+                <strong>Velká města</strong> = krajská města + města nad 50 000 obyvatel<br/>
                 <strong>Menší města</strong> = ostatní obce a města
               </p>
               <CompareCard 
                 t1="Velká města" v1={geoStats.big.aov} c1={geoStats.big.o}
                 t2="Menší města" v2={geoStats.small.aov} c2={geoStats.small.o}
                 i1="🏙️" i2="🏘️"
-                desc1="Krajská města + 50k+ obyvatel"
+                desc1="Praha, Brno, Ostrava, Plzeň..."
                 desc2="Ostatní obce a města"
               />
               
