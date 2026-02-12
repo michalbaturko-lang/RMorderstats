@@ -76,7 +76,7 @@ const getRevenueWithoutVAT = (order) => {
   const products = order.raw_data?.products || [];
   let total = 0;
   products.forEach(p => {
-    total += parseFloat(p.price_without_vat || 0) * (p.quantity || 1);
+    total += parseFloat(p.price_without_vat || 0);
   });
   // Převod měny
   const currency = order.currency || 'CZK';
