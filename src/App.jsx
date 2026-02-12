@@ -8,21 +8,94 @@ const DAYS_FULL = ['Neděle', 'Pondělí', 'Úterý', 'Středa', 'Čtvrtek', 'P�
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const CURRENCY_RATES = { CZK: 1, EUR: 25.2, HUF: 0.063 };
 
+// Velká města = krajská města a města nad 50 000 obyvatel
 const BIG_CITIES = {
-  cz: ['praha', 'brno', 'ostrava', 'plzeň', 'plzen', 'liberec', 'olomouc', 'budějovic', 'budejovic', 'hradec', 'ústí', 'usti', 'pardubice', 'zlín', 'zlin'],
-  sk: ['bratislava', 'košice', 'kosice', 'prešov', 'presov', 'žilina', 'zilina', 'nitra', 'bystrica', 'trnava', 'martin', 'trenčín', 'trencin'],
-  hu: ['budapest', 'debrecen', 'szeged', 'miskolc', 'pécs', 'pecs', 'győr', 'gyor', 'nyíregyháza', 'nyiregyhaza', 'kecskemét', 'kecskemet'],
+  cz: ['praha', 'brno', 'ostrava', 'plzeň', 'plzen', 'liberec', 'olomouc', 'budějovic', 'budejovic', 'hradec králové', 'hradec', 'ústí nad labem', 'usti', 'pardubice', 'zlín', 'zlin', 'havířov', 'havirov', 'kladno', 'most', 'opava', 'frýdek', 'frydek', 'karviná', 'karvina', 'jihlava', 'teplice', 'děčín', 'decin', 'karlovy vary'],
+  sk: ['bratislava', 'košice', 'kosice', 'prešov', 'presov', 'žilina', 'zilina', 'nitra', 'banská bystrica', 'bystrica', 'trnava', 'martin', 'trenčín', 'trencin', 'poprad'],
+  hu: ['budapest', 'debrecen', 'szeged', 'miskolc', 'pécs', 'pecs', 'győr', 'gyor', 'nyíregyháza', 'nyiregyhaza', 'kecskemét', 'kecskemet', 'székesfehérvár', 'szekesfehervar'],
+};
+
+// Agregace městských částí do hlavního města
+const CITY_AGGREGATION = {
+  'praha': /^praha\s*\d*/i,
+  'brno': /^brno\s*[-–]\s*/i,
+  'ostrava': /^ostrava\s*[-–]\s*/i,
+  'budapest': /^budapest\s*/i,
+  'bratislava': /^bratislava\s*/i,
+  'košice': /^košice\s*/i,
 };
 
 const normalizeCity = (city) => (city || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
-const isBigCity = (city, market) => (BIG_CITIES[market] || []).some(bc => normalizeCity(city).includes(bc));
+
+const aggregateCity = (city) => {
+  const normalized = (city || '').trim();
+  for (const [mainCity, pattern] of Object.entries(CITY_AGGREGATION)) {
+    if (pattern.test(normalized)) {
+      return mainCity.charAt(0).toUpperCase() + mainCity.slice(1);
+    }
+  }
+  return normalized || 'Neznámé';
+};
+
+const isBigCity = (city, market) => {
+  const normalized = normalizeCity(city);
+  return (BIG_CITIES[market] || []).some(bc => normalized.includes(bc));
+};
+
 const isB2B = (order) => order.raw_data?.customer?.company_yn === true || order.raw_data?.customer?.company_yn === 'true';
 const getRevenueCZK = (order) => parseFloat(order.raw_data?.order_total || 0) * (CURRENCY_RATES[order.currency] || 1);
+
+const formatNumber = (num) => Math.round(num).toLocaleString('cs-CZ');
+const formatCurrency = (num) => `${formatNumber(num)} Kč`;
 
 const getColorIntensity = (value, max) => {
   if (!max || !value) return 'bg-slate-100';
   const i = Math.min(value / max, 1);
   return i < 0.2 ? 'bg-blue-100' : i < 0.4 ? 'bg-blue-200' : i < 0.6 ? 'bg-blue-300' : i < 0.8 ? 'bg-blue-400' : 'bg-blue-500';
+};
+
+// Date presets
+const getDatePreset = (preset) => {
+  const today = new Date();
+  const formatDate = (d) => d.toISOString().split('T')[0];
+  
+  switch (preset) {
+    case 'today':
+      return { from: formatDate(today), to: formatDate(today) };
+    case 'yesterday':
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      return { from: formatDate(yesterday), to: formatDate(yesterday) };
+    case 'this_week':
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() - today.getDay() + 1);
+      return { from: formatDate(weekStart), to: formatDate(today) };
+    case 'last_week':
+      const lastWeekEnd = new Date(today);
+      lastWeekEnd.setDate(today.getDate() - today.getDay());
+      const lastWeekStart = new Date(lastWeekEnd);
+      lastWeekStart.setDate(lastWeekEnd.getDate() - 6);
+      return { from: formatDate(lastWeekStart), to: formatDate(lastWeekEnd) };
+    case 'this_month':
+      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+      return { from: formatDate(monthStart), to: formatDate(today) };
+    case 'last_month':
+      const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+      return { from: formatDate(lastMonthStart), to: formatDate(lastMonthEnd) };
+    case 'last_30':
+      const thirtyAgo = new Date(today);
+      thirtyAgo.setDate(today.getDate() - 30);
+      return { from: formatDate(thirtyAgo), to: formatDate(today) };
+    case 'last_90':
+      const ninetyAgo = new Date(today);
+      ninetyAgo.setDate(today.getDate() - 90);
+      return { from: formatDate(ninetyAgo), to: formatDate(today) };
+    case 'all':
+      return { from: '2025-11-01', to: formatDate(today) };
+    default:
+      return null;
+  }
 };
 
 const KPICard = ({ title, value, icon, sub }) => (
@@ -75,23 +148,51 @@ const Heatmap = ({ data, metric, onClick }) => {
   );
 };
 
-const CompareCard = ({ t1, v1, c1, t2, v2, c2, i1, i2, u = 'Kč' }) => {
+const CompareCard = ({ t1, v1, c1, t2, v2, c2, i1, i2, u = 'Kč', desc1, desc2 }) => {
   const w = v1 > v2 ? 1 : 2;
   return (
     <div className="grid grid-cols-2 gap-3">
       <div className={`rounded-xl p-4 transition-all ${w === 1 ? 'bg-blue-50 border-2 border-blue-400 shadow-md' : 'bg-slate-50 border border-slate-200'}`}>
-        <div className="flex items-center gap-2 text-sm text-slate-600 mb-2">{i1} {t1}</div>
-        <div className="text-2xl font-bold text-slate-800">{Math.round(v1).toLocaleString('cs-CZ')} {u}</div>
-        <div className="text-xs text-slate-500 mt-1">{c1} objednávek</div>
+        <div className="flex items-center gap-2 text-sm text-slate-600 mb-1">{i1} {t1}</div>
+        {desc1 && <div className="text-xs text-slate-400 mb-2">{desc1}</div>}
+        <div className="text-2xl font-bold text-slate-800">{formatCurrency(v1)}</div>
+        <div className="text-xs text-slate-500 mt-1">{formatNumber(c1)} objednávek</div>
       </div>
       <div className={`rounded-xl p-4 transition-all ${w === 2 ? 'bg-green-50 border-2 border-green-400 shadow-md' : 'bg-slate-50 border border-slate-200'}`}>
-        <div className="flex items-center gap-2 text-sm text-slate-600 mb-2">{i2} {t2}</div>
-        <div className="text-2xl font-bold text-slate-800">{Math.round(v2).toLocaleString('cs-CZ')} {u}</div>
-        <div className="text-xs text-slate-500 mt-1">{c2} objednávek</div>
+        <div className="flex items-center gap-2 text-sm text-slate-600 mb-1">{i2} {t2}</div>
+        {desc2 && <div className="text-xs text-slate-400 mb-2">{desc2}</div>}
+        <div className="text-2xl font-bold text-slate-800">{formatCurrency(v2)}</div>
+        <div className="text-xs text-slate-500 mt-1">{formatNumber(c2)} objednávek</div>
       </div>
     </div>
   );
 };
+
+const InsightBox = ({ children, type = 'info' }) => {
+  const styles = {
+    info: 'bg-amber-50 border-amber-200 text-amber-800',
+    success: 'bg-green-50 border-green-200 text-green-800',
+    action: 'bg-blue-50 border-blue-200 text-blue-800',
+  };
+  return (
+    <div className={`mt-4 p-4 rounded-xl border ${styles[type]}`}>
+      {children}
+    </div>
+  );
+};
+
+const DatePresetButton = ({ label, active, onClick }) => (
+  <button
+    onClick={onClick}
+    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
+      active 
+        ? 'bg-blue-500 text-white shadow-sm' 
+        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+    }`}
+  >
+    {label}
+  </button>
+);
 
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -101,12 +202,28 @@ export default function App() {
   const [metric, setMetric] = useState('orders');
   const [tab, setTab] = useState('heatmap');
   const [cell, setCell] = useState(null);
+  const [activePreset, setActivePreset] = useState('last_30');
   const [dateFrom, setDateFrom] = useState(() => { 
     const d = new Date(); 
     d.setDate(d.getDate() - 30); 
     return d.toISOString().split('T')[0]; 
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0]);
+
+  const applyPreset = (preset) => {
+    const dates = getDatePreset(preset);
+    if (dates) {
+      setDateFrom(dates.from);
+      setDateTo(dates.to);
+      setActivePreset(preset);
+    }
+  };
+
+  const handleDateChange = (type, value) => {
+    if (type === 'from') setDateFrom(value);
+    else setDateTo(value);
+    setActivePreset(null);
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -190,12 +307,16 @@ export default function App() {
     let bigC = { o: 0, r: 0 }, smallC = { o: 0, r: 0 };
     const cities = {};
     filtered.forEach(o => {
-      const c = o.raw_data?.customer?.city_invoice || '', r = getRevenueCZK(o), big = isBigCity(c, o.market);
+      const rawCity = o.raw_data?.customer?.city_invoice || '';
+      const city = aggregateCity(rawCity);
+      const r = getRevenueCZK(o);
+      const big = isBigCity(rawCity, o.market);
+      
       if (big) { bigC.o++; bigC.r += r; } else { smallC.o++; smallC.r += r; }
-      const k = c.trim() || 'Neznámé'; 
-      if (!cities[k]) cities[k] = { n: k, o: 0, r: 0 }; 
-      cities[k].o++; 
-      cities[k].r += r;
+      
+      if (!cities[city]) cities[city] = { n: city, o: 0, r: 0 }; 
+      cities[city].o++; 
+      cities[city].r += r;
     });
     const top = Object.values(cities)
       .filter(x => x.o >= 2)
@@ -221,6 +342,50 @@ export default function App() {
     };
   }, [filtered]);
 
+  // Generate insights
+  const geoInsight = useMemo(() => {
+    const diff = Math.abs(geoStats.big.aov - geoStats.small.aov);
+    const pctDiff = geoStats.small.aov ? ((geoStats.big.aov - geoStats.small.aov) / geoStats.small.aov * 100).toFixed(0) : 0;
+    
+    if (geoStats.big.aov > geoStats.small.aov) {
+      return {
+        title: `🎯 Velká města = vyšší AOV`,
+        main: `Zákazníci z velkých měst utrácí v průměru o ${formatCurrency(diff)} více (+${pctDiff}%).`,
+        action: `💡 Doporučení: Zvyšte bidové strategie pro krajská města a lokality nad 50k obyvatel. Zvažte prémiový remarketing pro Praha, Brno, Ostrava.`,
+        type: 'success'
+      };
+    } else {
+      return {
+        title: `🏘️ Menší města = překvapivě vyšší AOV`,
+        main: `Zákazníci z menších měst utrácí v průměru o ${formatCurrency(diff)} více (+${Math.abs(pctDiff)}%).`,
+        action: `💡 Doporučení: Prozkoumejte tento segment - možná zde máte méně konkurence. Otestujte kampaně mimo velká města.`,
+        type: 'info'
+      };
+    }
+  }, [geoStats]);
+
+  const b2bInsight = useMemo(() => {
+    const diff = Math.abs(b2bStats.b2b.aov - b2bStats.b2c.aov);
+    const pctDiff = b2bStats.b2c.aov ? ((b2bStats.b2b.aov - b2bStats.b2c.aov) / b2bStats.b2c.aov * 100).toFixed(0) : 0;
+    const b2bRevShare = ((b2bStats.b2b.r / (b2bStats.b2b.r + b2bStats.b2c.r)) * 100).toFixed(0);
+    
+    if (b2bStats.b2b.aov > b2bStats.b2c.aov) {
+      return {
+        title: `🏢 B2B segment je zlatý důl`,
+        main: `Firemní zákazníci utrácí o ${formatCurrency(diff)} více na objednávku (+${pctDiff}%). Tvoří ${b2bRevShare}% vašeho obratu.`,
+        action: `💡 Doporučení: Rozšiřte B2B marketing - firemní landing pages, množstevní slevy, fakturace na IČO. Zvažte dedikovaného B2B obchodníka.`,
+        type: 'success'
+      };
+    } else {
+      return {
+        title: `👤 B2C zákazníci překvapují`,
+        main: `Spotřebitelé utrácí o ${formatCurrency(diff)} více než firmy. B2B tvoří jen ${b2bRevShare}% obratu.`,
+        action: `💡 Doporučení: Váš produkt rezonuje s koncovými zákazníky. Zvažte influencer marketing a recenze na Heureka.`,
+        type: 'info'
+      };
+    }
+  }, [b2bStats]);
+
   if (loading) return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
       <div className="text-center">
@@ -243,28 +408,46 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 md:p-6">
       <div className="max-w-4xl mx-auto">
-        <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
+        {/* Header */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 gap-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-800">📊 Order Analytics</h1>
             <p className="text-slate-500 text-sm">REGAL MASTER - Analýza objednávek</p>
           </div>
-          <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-xl shadow-sm border">
+        </div>
+
+        {/* Date Presets */}
+        <div className="bg-white rounded-xl p-3 shadow-sm border mb-4">
+          <div className="flex flex-wrap gap-2 mb-3">
+            <DatePresetButton label="Dnes" active={activePreset === 'today'} onClick={() => applyPreset('today')} />
+            <DatePresetButton label="Včera" active={activePreset === 'yesterday'} onClick={() => applyPreset('yesterday')} />
+            <DatePresetButton label="Tento týden" active={activePreset === 'this_week'} onClick={() => applyPreset('this_week')} />
+            <DatePresetButton label="Minulý týden" active={activePreset === 'last_week'} onClick={() => applyPreset('last_week')} />
+            <DatePresetButton label="Tento měsíc" active={activePreset === 'this_month'} onClick={() => applyPreset('this_month')} />
+            <DatePresetButton label="Minulý měsíc" active={activePreset === 'last_month'} onClick={() => applyPreset('last_month')} />
+            <DatePresetButton label="30 dní" active={activePreset === 'last_30'} onClick={() => applyPreset('last_30')} />
+            <DatePresetButton label="90 dní" active={activePreset === 'last_90'} onClick={() => applyPreset('last_90')} />
+            <DatePresetButton label="Vše" active={activePreset === 'all'} onClick={() => applyPreset('all')} />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500">Vlastní:</span>
             <input 
               type="date" 
               value={dateFrom} 
-              onChange={e => setDateFrom(e.target.value)} 
+              onChange={e => handleDateChange('from', e.target.value)} 
               className="px-2 py-1 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" 
             />
             <span className="text-slate-400">→</span>
             <input 
               type="date" 
               value={dateTo} 
-              onChange={e => setDateTo(e.target.value)} 
+              onChange={e => handleDateChange('to', e.target.value)} 
               className="px-2 py-1 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" 
             />
           </div>
         </div>
 
+        {/* Country filter */}
         <div className="flex gap-2 mb-4 flex-wrap">
           {[
             { c: 'all', f: '🌍', n: 'Všechny země' }, 
@@ -286,13 +469,15 @@ export default function App() {
           ))}
         </div>
 
+        {/* KPIs */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-          <KPICard title="Objednávky" value={kpis.orders.toLocaleString('cs-CZ')} icon="🛒" />
-          <KPICard title="Obrat" value={`${Math.round(kpis.revenue / 1000).toLocaleString('cs-CZ')}k Kč`} icon="💰" />
-          <KPICard title="Ø Objednávka" value={`${Math.round(kpis.aov).toLocaleString('cs-CZ')} Kč`} icon="📦" />
+          <KPICard title="Objednávky" value={formatNumber(kpis.orders)} icon="🛒" />
+          <KPICard title="Obrat" value={formatCurrency(kpis.revenue)} icon="💰" />
+          <KPICard title="Ø Objednávka" value={formatCurrency(kpis.aov)} icon="📦" />
           <KPICard title="B2B podíl" value={`${kpis.b2bPct.toFixed(0)}%`} icon="🏢" sub={`🏙️ Velká města: ${kpis.bigPct.toFixed(0)}%`} />
         </div>
 
+        {/* Tabs */}
         <div className="flex gap-1 bg-white p-1 rounded-xl shadow-sm border mb-4">
           {[
             { id: 'heatmap', l: '🗓️ Časová analýza' }, 
@@ -313,6 +498,7 @@ export default function App() {
           ))}
         </div>
 
+        {/* Content */}
         <div className="bg-white rounded-2xl p-5 shadow-sm border">
           {tab === 'heatmap' && (
             <>
@@ -354,11 +540,11 @@ export default function App() {
                     </div>
                     <div>
                       <span className="text-blue-600">Obrat:</span>
-                      <span className="font-bold ml-2">{Math.round(cell.data?.revenue || 0).toLocaleString('cs-CZ')} Kč</span>
+                      <span className="font-bold ml-2">{formatCurrency(cell.data?.revenue || 0)}</span>
                     </div>
                     <div>
                       <span className="text-blue-600">Ø AOV:</span>
-                      <span className="font-bold ml-2">{Math.round(cell.data?.aov || 0).toLocaleString('cs-CZ')} Kč</span>
+                      <span className="font-bold ml-2">{formatCurrency(cell.data?.aov || 0)}</span>
                     </div>
                   </div>
                 </div>
@@ -368,21 +554,24 @@ export default function App() {
 
           {tab === 'geo' && (
             <>
-              <h2 className="text-lg font-semibold text-slate-800 mb-4">🏙️ Velká vs 🏘️ Menší města</h2>
+              <h2 className="text-lg font-semibold text-slate-800 mb-2">🏙️ Velká města vs 🏘️ Menší města</h2>
+              <p className="text-sm text-slate-500 mb-4">
+                <strong>Velká města</strong> = krajská města + města nad 50 000 obyvatel (Praha, Brno, Ostrava, Plzeň, Liberec, Olomouc, Hradec Králové, Ústí n.L., Pardubice, České Budějovice, Zlín, Havířov, Kladno...)<br/>
+                <strong>Menší města</strong> = ostatní obce a města
+              </p>
               <CompareCard 
                 t1="Velká města" v1={geoStats.big.aov} c1={geoStats.big.o}
                 t2="Menší města" v2={geoStats.small.aov} c2={geoStats.small.o}
-                i1="🏙️" i2="🏘️" 
+                i1="🏙️" i2="🏘️"
+                desc1="Krajská města + 50k+ obyvatel"
+                desc2="Ostatní obce a města"
               />
               
-              <div className="mt-4 p-3 bg-amber-50 rounded-xl border border-amber-200">
-                <p className="text-sm text-amber-800">
-                  💡 <strong>Insight:</strong> {geoStats.big.aov > geoStats.small.aov 
-                    ? `Velká města mají o ${Math.round(geoStats.big.aov - geoStats.small.aov)} Kč vyšší AOV - zvažte vyšší bid na tyto lokality`
-                    : `Menší města mají o ${Math.round(geoStats.small.aov - geoStats.big.aov)} Kč vyšší AOV - potenciál mimo velká města`
-                  }
-                </p>
-              </div>
+              <InsightBox type={geoInsight.type}>
+                <p className="font-semibold mb-1">{geoInsight.title}</p>
+                <p className="text-sm mb-2">{geoInsight.main}</p>
+                <p className="text-sm font-medium">{geoInsight.action}</p>
+              </InsightBox>
 
               <div className="mt-6">
                 <h3 className="text-sm font-semibold text-slate-700 mb-3">🏆 Top města podle AOV</h3>
@@ -394,7 +583,7 @@ export default function App() {
                         <span className="font-medium">{c.n}</span>
                         <span className="text-slate-400 text-sm">({c.o} obj)</span>
                       </div>
-                      <span className="font-bold text-slate-800">{Math.round(c.aov).toLocaleString('cs-CZ')} Kč</span>
+                      <span className="font-bold text-slate-800">{formatCurrency(c.aov)}</span>
                     </div>
                   ))}
                 </div>
@@ -404,18 +593,24 @@ export default function App() {
 
           {tab === 'b2b' && (
             <>
-              <h2 className="text-lg font-semibold text-slate-800 mb-4">🏢 B2B vs 👤 B2C analýza</h2>
+              <h2 className="text-lg font-semibold text-slate-800 mb-2">🏢 B2B vs 👤 B2C analýza</h2>
+              <p className="text-sm text-slate-500 mb-4">
+                <strong>B2B</strong> = objednávky na IČO (firemní zákazníci)<br/>
+                <strong>B2C</strong> = koncový spotřebitelé (bez IČO)
+              </p>
               <CompareCard 
                 t1="B2B (firmy)" v1={b2bStats.b2b.aov} c1={b2bStats.b2b.o}
                 t2="B2C (spotřebitelé)" v2={b2bStats.b2c.aov} c2={b2bStats.b2c.o}
-                i1="🏢" i2="👤" 
+                i1="🏢" i2="👤"
+                desc1="Objednávky na IČO"
+                desc2="Koncový spotřebitelé"
               />
               
               <div className="grid grid-cols-2 gap-4 mt-6">
                 <div className="bg-blue-50 rounded-xl p-4 text-center border border-blue-200">
                   <div className="text-sm text-blue-600 mb-1">B2B celkový obrat</div>
                   <div className="text-2xl font-bold text-blue-800">
-                    {Math.round(b2bStats.b2b.r / 1000).toLocaleString('cs-CZ')}k Kč
+                    {formatCurrency(b2bStats.b2b.r)}
                   </div>
                   <div className="text-xs text-blue-500 mt-1">
                     {(b2bStats.b2b.r / (b2bStats.b2b.r + b2bStats.b2c.r) * 100 || 0).toFixed(0)}% z celku
@@ -424,7 +619,7 @@ export default function App() {
                 <div className="bg-green-50 rounded-xl p-4 text-center border border-green-200">
                   <div className="text-sm text-green-600 mb-1">B2C celkový obrat</div>
                   <div className="text-2xl font-bold text-green-800">
-                    {Math.round(b2bStats.b2c.r / 1000).toLocaleString('cs-CZ')}k Kč
+                    {formatCurrency(b2bStats.b2c.r)}
                   </div>
                   <div className="text-xs text-green-500 mt-1">
                     {(b2bStats.b2c.r / (b2bStats.b2b.r + b2bStats.b2c.r) * 100 || 0).toFixed(0)}% z celku
@@ -432,21 +627,24 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="mt-4 p-3 bg-amber-50 rounded-xl border border-amber-200">
-                <p className="text-sm text-amber-800">
-                  💡 <strong>Insight:</strong> {b2bStats.b2b.aov > b2bStats.b2c.aov 
-                    ? `B2B zákazníci mají o ${Math.round(b2bStats.b2b.aov - b2bStats.b2c.aov)} Kč vyšší AOV - zaměřte se na firemní segment`
-                    : `B2C zákazníci mají překvapivě vyšší AOV - analyzujte produktový mix`
-                  }
-                </p>
-              </div>
+              <InsightBox type={b2bInsight.type}>
+                <p className="font-semibold mb-1">{b2bInsight.title}</p>
+                <p className="text-sm mb-2">{b2bInsight.main}</p>
+                <p className="text-sm font-medium">{b2bInsight.action}</p>
+              </InsightBox>
             </>
           )}
         </div>
 
-        <div className="mt-4 text-center text-sm text-slate-400">
-          {filtered.length.toLocaleString('cs-CZ')} objednávek • Live data ze Supabase • 
-          Poslední aktualizace: {new Date().toLocaleString('cs-CZ')}
+        {/* Footer */}
+        <div className="mt-6 text-center">
+          <p className="text-sm text-slate-400 mb-1">
+            {formatNumber(filtered.length)} objednávek • Live data ze Supabase • 
+            Aktualizace: {new Date().toLocaleString('cs-CZ')}
+          </p>
+          <p className="text-xs text-slate-300 italic">
+            🚀 Tady taky stavíme impérium :)
+          </p>
         </div>
       </div>
     </div>
