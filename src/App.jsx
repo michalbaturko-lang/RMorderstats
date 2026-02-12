@@ -111,17 +111,40 @@ export default function App() {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    fetch(`${SUPABASE_URL}/rest/v1/orders?select=*&order_date=gte.${dateFrom}&order_date=lte.${dateTo}T23:59:59`, {
-      headers: { 
-        'apikey': SUPABASE_KEY, 
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Range': '0-9999',
-        'Prefer': 'count=exact'
+    
+    async function fetchAllOrders() {
+      let allOrders = [];
+      let offset = 0;
+      const limit = 1000;
+      
+      while (true) {
+        const response = await fetch(
+          `${SUPABASE_URL}/rest/v1/orders?select=*&order_date=gte.${dateFrom}&order_date=lte.${dateTo}T23:59:59&order=order_date.desc&limit=${limit}&offset=${offset}`, 
+          {
+            headers: { 
+              'apikey': SUPABASE_KEY, 
+              'Authorization': `Bearer ${SUPABASE_KEY}`
+            }
+          }
+        );
+        
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        const data = await response.json();
+        if (!Array.isArray(data) || data.length === 0) break;
+        
+        allOrders = allOrders.concat(data);
+        offset += limit;
+        
+        if (data.length < limit) break;
       }
-    })
-    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-    .then(d => { setOrders(Array.isArray(d) ? d : []); setLoading(false); })
-    .catch(e => { setError(e.message); setLoading(false); });
+      
+      return allOrders;
+    }
+    
+    fetchAllOrders()
+      .then(d => { setOrders(d); setLoading(false); })
+      .catch(e => { setError(e.message); setLoading(false); });
   }, [dateFrom, dateTo]);
 
   const filtered = useMemo(() => country === 'all' ? orders : orders.filter(o => o.market === country), [orders, country]);
@@ -220,7 +243,6 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 md:p-6">
       <div className="max-w-4xl mx-auto">
-        {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-800">📊 Order Analytics</h1>
@@ -243,7 +265,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Country filter */}
         <div className="flex gap-2 mb-4 flex-wrap">
           {[
             { c: 'all', f: '🌍', n: 'Všechny země' }, 
@@ -265,7 +286,6 @@ export default function App() {
           ))}
         </div>
 
-        {/* KPIs */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           <KPICard title="Objednávky" value={kpis.orders.toLocaleString('cs-CZ')} icon="🛒" />
           <KPICard title="Obrat" value={`${Math.round(kpis.revenue / 1000).toLocaleString('cs-CZ')}k Kč`} icon="💰" />
@@ -273,7 +293,6 @@ export default function App() {
           <KPICard title="B2B podíl" value={`${kpis.b2bPct.toFixed(0)}%`} icon="🏢" sub={`🏙️ Velká města: ${kpis.bigPct.toFixed(0)}%`} />
         </div>
 
-        {/* Tabs */}
         <div className="flex gap-1 bg-white p-1 rounded-xl shadow-sm border mb-4">
           {[
             { id: 'heatmap', l: '🗓️ Časová analýza' }, 
@@ -294,7 +313,6 @@ export default function App() {
           ))}
         </div>
 
-        {/* Content */}
         <div className="bg-white rounded-2xl p-5 shadow-sm border">
           {tab === 'heatmap' && (
             <>
@@ -426,7 +444,6 @@ export default function App() {
           )}
         </div>
 
-        {/* Footer */}
         <div className="mt-4 text-center text-sm text-slate-400">
           {filtered.length.toLocaleString('cs-CZ')} objednávek • Live data ze Supabase • 
           Poslední aktualizace: {new Date().toLocaleString('cs-CZ')}
