@@ -1,0 +1,432 @@
+import React, { useState, useEffect, useMemo } from 'react';
+
+const SUPABASE_URL = 'https://oonnawrfsbsbuijmfcqj.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9vbm5hd3Jmc2JzYnVpam1mY3FqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzMjA4ODcsImV4cCI6MjA4NTg5Njg4N30.d1jk1BYOc6eEx-KJzGpW3ekfDs4jxW10VgKmLef8f1Y';
+
+const DAYS = ['Ne', 'Po', 'Út', 'St', 'Čt', 'Pá', 'So'];
+const DAYS_FULL = ['Neděle', 'Pondělí', 'Úterý', 'Středa', 'Čtvrtek', 'Pátek', 'Sobota'];
+const HOURS = Array.from({ length: 24 }, (_, i) => i);
+const CURRENCY_RATES = { CZK: 1, EUR: 25.2, HUF: 0.063 };
+
+const BIG_CITIES = {
+  cz: ['praha', 'brno', 'ostrava', 'plzeň', 'plzen', 'liberec', 'olomouc', 'budějovic', 'budejovic', 'hradec', 'ústí', 'usti', 'pardubice', 'zlín', 'zlin'],
+  sk: ['bratislava', 'košice', 'kosice', 'prešov', 'presov', 'žilina', 'zilina', 'nitra', 'bystrica', 'trnava', 'martin', 'trenčín', 'trencin'],
+  hu: ['budapest', 'debrecen', 'szeged', 'miskolc', 'pécs', 'pecs', 'győr', 'gyor', 'nyíregyháza', 'nyiregyhaza', 'kecskemét', 'kecskemet'],
+};
+
+const normalizeCity = (city) => (city || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+const isBigCity = (city, market) => (BIG_CITIES[market] || []).some(bc => normalizeCity(city).includes(bc));
+const isB2B = (order) => order.raw_data?.customer?.company_yn === true || order.raw_data?.customer?.company_yn === 'true';
+const getRevenueCZK = (order) => parseFloat(order.raw_data?.order_total || 0) * (CURRENCY_RATES[order.currency] || 1);
+
+const getColorIntensity = (value, max) => {
+  if (!max || !value) return 'bg-slate-100';
+  const i = Math.min(value / max, 1);
+  return i < 0.2 ? 'bg-blue-100' : i < 0.4 ? 'bg-blue-200' : i < 0.6 ? 'bg-blue-300' : i < 0.8 ? 'bg-blue-400' : 'bg-blue-500';
+};
+
+const KPICard = ({ title, value, icon, sub }) => (
+  <div className="bg-white rounded-xl p-3 shadow-sm border border-slate-200">
+    <div className="flex items-center gap-2 text-slate-500 text-xs mb-1">{icon} {title}</div>
+    <div className="text-2xl font-bold text-slate-800">{value}</div>
+    {sub && <div className="text-xs text-slate-400 mt-1">{sub}</div>}
+  </div>
+);
+
+const Heatmap = ({ data, metric, onClick }) => {
+  const max = useMemo(() => {
+    let m = 0;
+    for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) m = Math.max(m, data[d]?.[h]?.[metric] || 0);
+    return m;
+  }, [data, metric]);
+
+  return (
+    <div className="overflow-x-auto">
+      <div className="min-w-[600px]">
+        <div className="flex">
+          <div className="w-10" />
+          {HOURS.map(h => (
+            <div key={h} className="flex-1 text-center text-[10px] text-slate-400">{h}</div>
+          ))}
+        </div>
+        {[1,2,3,4,5,6,0].map(d => (
+          <div key={d} className="flex items-center">
+            <div className="w-10 text-xs text-slate-500 font-medium">{DAYS[d]}</div>
+            {HOURS.map(h => (
+              <div 
+                key={h} 
+                onClick={() => onClick(d, h, data[d]?.[h])}
+                className={`flex-1 aspect-square m-0.5 rounded cursor-pointer transition-all hover:ring-2 hover:ring-blue-400 hover:scale-110 ${getColorIntensity(data[d]?.[h]?.[metric], max)}`} 
+              />
+            ))}
+          </div>
+        ))}
+        <div className="flex items-center justify-end mt-3 gap-1 text-xs text-slate-400">
+          <span>Méně</span>
+          <div className="w-4 h-4 bg-blue-100 rounded"></div>
+          <div className="w-4 h-4 bg-blue-200 rounded"></div>
+          <div className="w-4 h-4 bg-blue-300 rounded"></div>
+          <div className="w-4 h-4 bg-blue-400 rounded"></div>
+          <div className="w-4 h-4 bg-blue-500 rounded"></div>
+          <span>Více</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const CompareCard = ({ t1, v1, c1, t2, v2, c2, i1, i2, u = 'Kč' }) => {
+  const w = v1 > v2 ? 1 : 2;
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <div className={`rounded-xl p-4 transition-all ${w === 1 ? 'bg-blue-50 border-2 border-blue-400 shadow-md' : 'bg-slate-50 border border-slate-200'}`}>
+        <div className="flex items-center gap-2 text-sm text-slate-600 mb-2">{i1} {t1}</div>
+        <div className="text-2xl font-bold text-slate-800">{Math.round(v1).toLocaleString('cs-CZ')} {u}</div>
+        <div className="text-xs text-slate-500 mt-1">{c1} objednávek</div>
+      </div>
+      <div className={`rounded-xl p-4 transition-all ${w === 2 ? 'bg-green-50 border-2 border-green-400 shadow-md' : 'bg-slate-50 border border-slate-200'}`}>
+        <div className="flex items-center gap-2 text-sm text-slate-600 mb-2">{i2} {t2}</div>
+        <div className="text-2xl font-bold text-slate-800">{Math.round(v2).toLocaleString('cs-CZ')} {u}</div>
+        <div className="text-xs text-slate-500 mt-1">{c2} objednávek</div>
+      </div>
+    </div>
+  );
+};
+
+export default function App() {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [orders, setOrders] = useState([]);
+  const [country, setCountry] = useState('all');
+  const [metric, setMetric] = useState('orders');
+  const [tab, setTab] = useState('heatmap');
+  const [cell, setCell] = useState(null);
+  const [dateFrom, setDateFrom] = useState(() => { 
+    const d = new Date(); 
+    d.setDate(d.getDate() - 30); 
+    return d.toISOString().split('T')[0]; 
+  });
+  const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0]);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    fetch(`${SUPABASE_URL}/rest/v1/orders?select=*&order_date=gte.${dateFrom}&order_date=lte.${dateTo}T23:59:59&limit=5000`, {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+    })
+    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+    .then(d => { setOrders(Array.isArray(d) ? d : []); setLoading(false); })
+    .catch(e => { setError(e.message); setLoading(false); });
+  }, [dateFrom, dateTo]);
+
+  const filtered = useMemo(() => country === 'all' ? orders : orders.filter(o => o.market === country), [orders, country]);
+
+  const kpis = useMemo(() => {
+    let cnt = 0, rev = 0, b2b = 0, big = 0;
+    filtered.forEach(o => { 
+      cnt++; 
+      rev += getRevenueCZK(o); 
+      if (isB2B(o)) b2b++; 
+      if (isBigCity(o.raw_data?.customer?.city_invoice, o.market)) big++; 
+    });
+    return { 
+      orders: cnt, 
+      revenue: rev, 
+      aov: cnt ? rev / cnt : 0, 
+      b2bPct: cnt ? b2b / cnt * 100 : 0, 
+      bigPct: cnt ? big / cnt * 100 : 0 
+    };
+  }, [filtered]);
+
+  const heatmap = useMemo(() => {
+    const d = {};
+    for (let day = 0; day < 7; day++) { 
+      d[day] = {}; 
+      for (let h = 0; h < 24; h++) d[day][h] = { orders: 0, revenue: 0, aov: 0 }; 
+    }
+    filtered.forEach(o => {
+      if (!o.order_date) return;
+      const dt = new Date(o.order_date), day = dt.getDay(), h = dt.getHours(), r = getRevenueCZK(o);
+      d[day][h].orders++; 
+      d[day][h].revenue += r;
+    });
+    for (let day = 0; day < 7; day++) {
+      for (let h = 0; h < 24; h++) {
+        d[day][h].aov = d[day][h].orders ? d[day][h].revenue / d[day][h].orders : 0;
+      }
+    }
+    return d;
+  }, [filtered]);
+
+  const geoStats = useMemo(() => {
+    let bigC = { o: 0, r: 0 }, smallC = { o: 0, r: 0 };
+    const cities = {};
+    filtered.forEach(o => {
+      const c = o.raw_data?.customer?.city_invoice || '', r = getRevenueCZK(o), big = isBigCity(c, o.market);
+      if (big) { bigC.o++; bigC.r += r; } else { smallC.o++; smallC.r += r; }
+      const k = c.trim() || 'Neznámé'; 
+      if (!cities[k]) cities[k] = { n: k, o: 0, r: 0 }; 
+      cities[k].o++; 
+      cities[k].r += r;
+    });
+    const top = Object.values(cities)
+      .filter(x => x.o >= 2)
+      .map(x => ({ ...x, aov: x.r / x.o }))
+      .sort((a, b) => b.aov - a.aov)
+      .slice(0, 8);
+    return { 
+      big: { ...bigC, aov: bigC.o ? bigC.r / bigC.o : 0 }, 
+      small: { ...smallC, aov: smallC.o ? smallC.r / smallC.o : 0 }, 
+      top 
+    };
+  }, [filtered]);
+
+  const b2bStats = useMemo(() => {
+    let b2b = { o: 0, r: 0 }, b2c = { o: 0, r: 0 };
+    filtered.forEach(o => { 
+      const r = getRevenueCZK(o); 
+      if (isB2B(o)) { b2b.o++; b2b.r += r; } else { b2c.o++; b2c.r += r; } 
+    });
+    return { 
+      b2b: { ...b2b, aov: b2b.o ? b2b.r / b2b.o : 0 }, 
+      b2c: { ...b2c, aov: b2c.o ? b2c.r / b2c.o : 0 } 
+    };
+  }, [filtered]);
+
+  if (loading) return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto" />
+        <p className="mt-4 text-slate-500">Načítám data ze Supabase...</p>
+      </div>
+    </div>
+  );
+
+  if (error) return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
+      <div className="text-center bg-white p-8 rounded-2xl shadow-lg">
+        <div className="text-red-500 text-4xl mb-4">⚠️</div>
+        <p className="font-bold text-slate-800 text-lg">Chyba načítání</p>
+        <p className="text-slate-500 mt-2">{error}</p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 md:p-6">
+      <div className="max-w-4xl mx-auto">
+        {/* Header */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-800">📊 Order Analytics</h1>
+            <p className="text-slate-500 text-sm">REGAL MASTER - Analýza objednávek</p>
+          </div>
+          <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-xl shadow-sm border">
+            <input 
+              type="date" 
+              value={dateFrom} 
+              onChange={e => setDateFrom(e.target.value)} 
+              className="px-2 py-1 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" 
+            />
+            <span className="text-slate-400">→</span>
+            <input 
+              type="date" 
+              value={dateTo} 
+              onChange={e => setDateTo(e.target.value)} 
+              className="px-2 py-1 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" 
+            />
+          </div>
+        </div>
+
+        {/* Country filter */}
+        <div className="flex gap-2 mb-4 flex-wrap">
+          {[
+            { c: 'all', f: '🌍', n: 'Všechny země' }, 
+            { c: 'cz', f: '🇨🇿', n: 'Česko' }, 
+            { c: 'sk', f: '🇸🇰', n: 'Slovensko' }, 
+            { c: 'hu', f: '🇭🇺', n: 'Maďarsko' }
+          ].map(x => (
+            <button 
+              key={x.c} 
+              onClick={() => setCountry(x.c)}
+              className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+                country === x.c 
+                  ? 'bg-blue-500 text-white shadow-md' 
+                  : 'bg-white border border-slate-200 text-slate-600 hover:border-blue-300 hover:shadow-sm'
+              }`}
+            >
+              {x.f} {x.n}
+            </button>
+          ))}
+        </div>
+
+        {/* KPIs */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+          <KPICard title="Objednávky" value={kpis.orders.toLocaleString('cs-CZ')} icon="🛒" />
+          <KPICard title="Obrat" value={`${Math.round(kpis.revenue / 1000).toLocaleString('cs-CZ')}k Kč`} icon="💰" />
+          <KPICard title="Ø Objednávka" value={`${Math.round(kpis.aov).toLocaleString('cs-CZ')} Kč`} icon="📦" />
+          <KPICard title="B2B podíl" value={`${kpis.b2bPct.toFixed(0)}%`} icon="🏢" sub={`🏙️ Velká města: ${kpis.bigPct.toFixed(0)}%`} />
+        </div>
+
+        {/* Tabs */}
+        <div className="flex gap-1 bg-white p-1 rounded-xl shadow-sm border mb-4">
+          {[
+            { id: 'heatmap', l: '🗓️ Časová analýza' }, 
+            { id: 'geo', l: '📍 Geografie' }, 
+            { id: 'b2b', l: '🏢 B2B / B2C' }
+          ].map(t => (
+            <button 
+              key={t.id} 
+              onClick={() => setTab(t.id)}
+              className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                tab === t.id 
+                  ? 'bg-blue-500 text-white shadow-md' 
+                  : 'text-slate-500 hover:bg-slate-50'
+              }`}
+            >
+              {t.l}
+            </button>
+          ))}
+        </div>
+
+        {/* Content */}
+        <div className="bg-white rounded-2xl p-5 shadow-sm border">
+          {tab === 'heatmap' && (
+            <>
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-4">
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-800">Heatmapa: Den × Hodina</h2>
+                  <p className="text-sm text-slate-500">Klikni na buňku pro detail</p>
+                </div>
+                <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">
+                  {[
+                    { c: 'orders', l: 'Objednávky' }, 
+                    { c: 'revenue', l: 'Obrat' }, 
+                    { c: 'aov', l: 'AOV' }
+                  ].map(m => (
+                    <button 
+                      key={m.c} 
+                      onClick={() => setMetric(m.c)}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                        metric === m.c 
+                          ? 'bg-white shadow text-slate-800' 
+                          : 'text-slate-500 hover:text-slate-700'
+                      }`}
+                    >
+                      {m.l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <Heatmap data={heatmap} metric={metric} onClick={(d, h, data) => setCell({ d, h, data })} />
+              {cell && (
+                <div className="mt-4 p-4 bg-blue-50 rounded-xl border border-blue-200">
+                  <div className="font-semibold text-blue-800 mb-2">
+                    {DAYS_FULL[cell.d]} {cell.h}:00 - {cell.h}:59
+                  </div>
+                  <div className="grid grid-cols-3 gap-4 text-sm">
+                    <div>
+                      <span className="text-blue-600">Objednávky:</span>
+                      <span className="font-bold ml-2">{cell.data?.orders || 0}</span>
+                    </div>
+                    <div>
+                      <span className="text-blue-600">Obrat:</span>
+                      <span className="font-bold ml-2">{Math.round(cell.data?.revenue || 0).toLocaleString('cs-CZ')} Kč</span>
+                    </div>
+                    <div>
+                      <span className="text-blue-600">Ø AOV:</span>
+                      <span className="font-bold ml-2">{Math.round(cell.data?.aov || 0).toLocaleString('cs-CZ')} Kč</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {tab === 'geo' && (
+            <>
+              <h2 className="text-lg font-semibold text-slate-800 mb-4">🏙️ Velká vs 🏘️ Menší města</h2>
+              <CompareCard 
+                t1="Velká města" v1={geoStats.big.aov} c1={geoStats.big.o}
+                t2="Menší města" v2={geoStats.small.aov} c2={geoStats.small.o}
+                i1="🏙️" i2="🏘️" 
+              />
+              
+              <div className="mt-4 p-3 bg-amber-50 rounded-xl border border-amber-200">
+                <p className="text-sm text-amber-800">
+                  💡 <strong>Insight:</strong> {geoStats.big.aov > geoStats.small.aov 
+                    ? `Velká města mají o ${Math.round(geoStats.big.aov - geoStats.small.aov)} Kč vyšší AOV - zvažte vyšší bid na tyto lokality`
+                    : `Menší města mají o ${Math.round(geoStats.small.aov - geoStats.big.aov)} Kč vyšší AOV - potenciál mimo velká města`
+                  }
+                </p>
+              </div>
+
+              <div className="mt-6">
+                <h3 className="text-sm font-semibold text-slate-700 mb-3">🏆 Top města podle AOV</h3>
+                <div className="space-y-2">
+                  {geoStats.top.map((c, i) => (
+                    <div key={i} className="flex justify-between items-center bg-slate-50 rounded-lg px-3 py-2">
+                      <div className="flex items-center gap-3">
+                        <span className="text-slate-400 text-sm w-5">{i + 1}.</span>
+                        <span className="font-medium">{c.n}</span>
+                        <span className="text-slate-400 text-sm">({c.o} obj)</span>
+                      </div>
+                      <span className="font-bold text-slate-800">{Math.round(c.aov).toLocaleString('cs-CZ')} Kč</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {tab === 'b2b' && (
+            <>
+              <h2 className="text-lg font-semibold text-slate-800 mb-4">🏢 B2B vs 👤 B2C analýza</h2>
+              <CompareCard 
+                t1="B2B (firmy)" v1={b2bStats.b2b.aov} c1={b2bStats.b2b.o}
+                t2="B2C (spotřebitelé)" v2={b2bStats.b2c.aov} c2={b2bStats.b2c.o}
+                i1="🏢" i2="👤" 
+              />
+              
+              <div className="grid grid-cols-2 gap-4 mt-6">
+                <div className="bg-blue-50 rounded-xl p-4 text-center border border-blue-200">
+                  <div className="text-sm text-blue-600 mb-1">B2B celkový obrat</div>
+                  <div className="text-2xl font-bold text-blue-800">
+                    {Math.round(b2bStats.b2b.r / 1000).toLocaleString('cs-CZ')}k Kč
+                  </div>
+                  <div className="text-xs text-blue-500 mt-1">
+                    {(b2bStats.b2b.r / (b2bStats.b2b.r + b2bStats.b2c.r) * 100 || 0).toFixed(0)}% z celku
+                  </div>
+                </div>
+                <div className="bg-green-50 rounded-xl p-4 text-center border border-green-200">
+                  <div className="text-sm text-green-600 mb-1">B2C celkový obrat</div>
+                  <div className="text-2xl font-bold text-green-800">
+                    {Math.round(b2bStats.b2c.r / 1000).toLocaleString('cs-CZ')}k Kč
+                  </div>
+                  <div className="text-xs text-green-500 mt-1">
+                    {(b2bStats.b2c.r / (b2bStats.b2b.r + b2bStats.b2c.r) * 100 || 0).toFixed(0)}% z celku
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 p-3 bg-amber-50 rounded-xl border border-amber-200">
+                <p className="text-sm text-amber-800">
+                  💡 <strong>Insight:</strong> {b2bStats.b2b.aov > b2bStats.b2c.aov 
+                    ? `B2B zákazníci mají o ${Math.round(b2bStats.b2b.aov - b2bStats.b2c.aov)} Kč vyšší AOV - zaměřte se na firemní segment`
+                    : `B2C zákazníci mají překvapivě vyšší AOV - analyzujte produktový mix`
+                  }
+                </p>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="mt-4 text-center text-sm text-slate-400">
+          {filtered.length.toLocaleString('cs-CZ')} objednávek • Live data ze Supabase • 
+          Poslední aktualizace: {new Date().toLocaleString('cs-CZ')}
+        </div>
+      </div>
+    </div>
+  );
+}
