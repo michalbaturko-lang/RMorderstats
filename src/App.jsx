@@ -111,8 +111,13 @@ export default function App() {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    fetch(`${SUPABASE_URL}/rest/v1/orders?select=*&order_date=gte.${dateFrom}&order_date=lte.${dateTo}T23:59:59&limit=5000`, {
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+    fetch(`${SUPABASE_URL}/rest/v1/orders?select=*&order_date=gte.${dateFrom}&order_date=lte.${dateTo}T23:59:59`, {
+      headers: { 
+        'apikey': SUPABASE_KEY, 
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Range': '0-9999',
+        'Prefer': 'count=exact'
+      }
     })
     .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
     .then(d => { setOrders(Array.isArray(d) ? d : []); setLoading(false); })
