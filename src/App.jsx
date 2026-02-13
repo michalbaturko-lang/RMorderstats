@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = 'https://oonnawrfsbsbuijmfcqj.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9vbm5hd3Jmc2JzYnVpam1mY3FqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzMjA4ODcsImV4cCI6MjA4NTg5Njg4N30.d1jk1BYOc6eEx-KJzGpW3ekfDs4jxW10VgKmLef8f1Y';
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const ALLOWED_DOMAINS = ['regalmaster.cz', 'smartbidding.cz'];
 
 const LOADING_MESSAGES = [
   "🔧 Stavím regál...",
@@ -333,7 +337,40 @@ const LoadingOverlay = ({ message }) => (
   </div>
 );
 
+const LoginPage = ({ onLogin, error: authError }) => (
+  <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
+    <div className="bg-white rounded-2xl shadow-lg p-8 max-w-sm w-full text-center">
+      <div className="text-4xl mb-4">📊</div>
+      <h1 className="text-2xl font-bold text-slate-800 mb-1">Order Analytics</h1>
+      <p className="text-slate-500 text-sm mb-6">REGAL MASTER</p>
+      {authError && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+          {authError}
+        </div>
+      )}
+      <button
+        onClick={onLogin}
+        className="w-full flex items-center justify-center gap-3 px-4 py-3 bg-white border-2 border-slate-200 rounded-xl text-sm font-medium text-slate-700 hover:border-blue-400 hover:shadow-md transition-all"
+      >
+        <svg className="w-5 h-5" viewBox="0 0 24 24">
+          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/>
+          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+        </svg>
+        Přihlásit se přes Google
+      </button>
+      <p className="text-xs text-slate-400 mt-4">
+        Pouze pro @regalmaster.cz a @smartbidding.cz
+      </p>
+    </div>
+  </div>
+);
+
 export default function App() {
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [orders, setOrders] = useState([]);
@@ -344,12 +381,58 @@ export default function App() {
   const [groupDays, setGroupDays] = useState(false);
   const [activePreset, setActivePreset] = useState('last_30');
   const [loadingMessage, setLoadingMessage] = useState(LOADING_MESSAGES[0]);
-  const [dateFrom, setDateFrom] = useState(() => { 
-    const d = new Date(); 
-    d.setDate(d.getDate() - 30); 
-    return d.toISOString().split('T')[0]; 
+  const [dateFrom, setDateFrom] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().split('T')[0];
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0]);
+
+  // Auth: listen for session changes
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        const domain = session.user.email?.split('@')[1];
+        if (ALLOWED_DOMAINS.includes(domain)) {
+          setUser(session.user);
+        } else {
+          supabase.auth.signOut();
+          setAuthError(`Email ${session.user.email} nemá přístup. Povolené domény: ${ALLOWED_DOMAINS.join(', ')}`);
+        }
+      }
+      setAuthLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        const domain = session.user.email?.split('@')[1];
+        if (ALLOWED_DOMAINS.includes(domain)) {
+          setUser(session.user);
+          setAuthError(null);
+        } else {
+          supabase.auth.signOut();
+          setAuthError(`Email ${session.user.email} nemá přístup. Povolené domény: ${ALLOWED_DOMAINS.join(', ')}`);
+        }
+      } else {
+        setUser(null);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleLogin = async () => {
+    setAuthError(null);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin }
+    });
+    if (error) setAuthError(error.message);
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+  };
 
   // Rotate loading messages
   useEffect(() => {
@@ -574,6 +657,14 @@ export default function App() {
     }
   }, [b2bStats]);
 
+  if (authLoading) return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
+      <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full"></div>
+    </div>
+  );
+
+  if (!user) return <LoginPage onLogin={handleLogin} error={authError} />;
+
   if (error) return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
       <div className="text-center bg-white p-8 rounded-2xl shadow-lg">
@@ -594,6 +685,15 @@ export default function App() {
           <div>
             <h1 className="text-2xl font-bold text-slate-800">📊 Order Analytics</h1>
             <p className="text-slate-500 text-sm">REGAL MASTER - Analýza objednávek (bez DPH a poštovného)</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-slate-400">{user.email}</span>
+            <button
+              onClick={handleLogout}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all"
+            >
+              Odhlásit
+            </button>
           </div>
         </div>
 
