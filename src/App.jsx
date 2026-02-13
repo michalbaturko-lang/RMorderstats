@@ -382,8 +382,9 @@ export default function App() {
       const limit = 1000;
       
       // Timezone offset pro správné filtrování podle lokálního času (CET/CEST)
+      // +01:00 → %2B01:00 (URL encoding pro Supabase PostgREST)
       const tzOffset = -new Date().getTimezoneOffset();
-      const tzSign = tzOffset >= 0 ? '+' : '-';
+      const tzSign = tzOffset >= 0 ? '%2B' : '-';
       const tzHours = String(Math.floor(Math.abs(tzOffset) / 60)).padStart(2, '0');
       const tzMins = String(Math.abs(tzOffset) % 60).padStart(2, '0');
       const tz = `${tzSign}${tzHours}:${tzMins}`;
