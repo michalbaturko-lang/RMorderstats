@@ -5,7 +5,6 @@ const SUPABASE_URL = 'https://oonnawrfsbsbuijmfcqj.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9vbm5hd3Jmc2JzYnVpam1mY3FqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzMjA4ODcsImV4cCI6MjA4NTg5Njg4N30.d1jk1BYOc6eEx-KJzGpW3ekfDs4jxW10VgKmLef8f1Y';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-const ALLOWED_DOMAINS = ['regalmaster.cz', 'smartbidding.cz'];
 
 const LOADING_MESSAGES = [
   "🔧 Stavím regál...",
@@ -361,7 +360,7 @@ const LoginPage = ({ onLogin, error: authError }) => (
         Přihlásit se přes Google
       </button>
       <p className="text-xs text-slate-400 mt-4">
-        Pouze pro @regalmaster.cz a @smartbidding.cz
+        🚀 Impérium to bude.
       </p>
     </div>
   </div>
@@ -392,27 +391,15 @@ export default function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
-        const domain = session.user.email?.split('@')[1];
-        if (ALLOWED_DOMAINS.includes(domain)) {
-          setUser(session.user);
-        } else {
-          supabase.auth.signOut();
-          setAuthError(`Email ${session.user.email} nemá přístup. Povolené domény: ${ALLOWED_DOMAINS.join(', ')}`);
-        }
+        setUser(session.user);
       }
       setAuthLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
-        const domain = session.user.email?.split('@')[1];
-        if (ALLOWED_DOMAINS.includes(domain)) {
-          setUser(session.user);
-          setAuthError(null);
-        } else {
-          supabase.auth.signOut();
-          setAuthError(`Email ${session.user.email} nemá přístup. Povolené domény: ${ALLOWED_DOMAINS.join(', ')}`);
-        }
+        setUser(session.user);
+        setAuthError(null);
       } else {
         setUser(null);
       }
