@@ -381,9 +381,16 @@ export default function App() {
       let offset = 0;
       const limit = 1000;
       
+      // Timezone offset pro správné filtrování podle lokálního času (CET/CEST)
+      const tzOffset = -new Date().getTimezoneOffset();
+      const tzSign = tzOffset >= 0 ? '+' : '-';
+      const tzHours = String(Math.floor(Math.abs(tzOffset) / 60)).padStart(2, '0');
+      const tzMins = String(Math.abs(tzOffset) % 60).padStart(2, '0');
+      const tz = `${tzSign}${tzHours}:${tzMins}`;
+
       while (true) {
         const response = await fetch(
-          `${SUPABASE_URL}/rest/v1/orders?select=*&order_date=gte.${dateFrom}&order_date=lte.${dateTo}T23:59:59&order=order_date.desc&limit=${limit}&offset=${offset}`, 
+          `${SUPABASE_URL}/rest/v1/orders?select=*&order_date=gte.${dateFrom}T00:00:00${tz}&order_date=lte.${dateTo}T23:59:59${tz}&order=order_date.desc&limit=${limit}&offset=${offset}`, 
           {
             headers: { 
               'apikey': SUPABASE_KEY, 
