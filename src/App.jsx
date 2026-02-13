@@ -573,12 +573,12 @@ export default function App() {
       
       if (big) { bigC.o++; bigC.r += r; } else { smallC.o++; smallC.r += r; }
       
-      if (!cities[city]) cities[city] = { n: city, o: 0, r: 0 }; 
-      cities[city].o++; 
+      if (!cities[city]) cities[city] = { n: city, o: 0, r: 0, big };
+      cities[city].o++;
       cities[city].r += r;
     });
     const top = Object.values(cities)
-      .filter(x => x.o >= 2)
+      .filter(x => x.o >= 2 && !x.big)
       .map(x => ({ ...x, aov: x.r / x.o }))
       .sort((a, b) => b.aov - a.aov)
       .slice(0, 8);
@@ -860,7 +860,8 @@ export default function App() {
               </InsightBox>
 
               <div className="mt-6">
-                <h3 className="text-sm font-semibold text-slate-700 mb-3">🏆 Top města podle AOV</h3>
+                <h3 className="text-sm font-semibold text-slate-700 mb-1">🏆 Top menší města podle AOV</h3>
+                <p className="text-xs text-slate-400 mb-3">Menší města (mimo krajská) s nejvyšší průměrnou objednávkou. Min. 2 objednávky, bez DPH a poštovného.</p>
                 <div className="space-y-2">
                   {geoStats.top.map((c, i) => (
                     <div key={i} className="flex justify-between items-center bg-slate-50 rounded-lg px-3 py-2">
