@@ -378,12 +378,11 @@ export default function App() {
   const [tab, setTab] = useState('heatmap');
   const [cell, setCell] = useState(null);
   const [groupDays, setGroupDays] = useState(false);
-  const [activePreset, setActivePreset] = useState('last_30');
+  const [activePreset, setActivePreset] = useState('this_month');
   const [loadingMessage, setLoadingMessage] = useState(LOADING_MESSAGES[0]);
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date();
-    d.setDate(d.getDate() - 30);
-    return d.toISOString().split('T')[0];
+    return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0]);
 
