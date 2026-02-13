@@ -76,7 +76,8 @@ const getRevenueWithoutVAT = (order) => {
   const products = order.raw_data?.products || [];
   let total = 0;
   products.forEach(p => {
-    total += parseFloat(p.price_without_vat || 0) * (p.quantity || 1);
+    // price_without_vat je už celková cena za řádek (price_per_unit_without_vat × quantity)
+    total += parseFloat(p.price_without_vat || 0);
   });
   // Převod měny
   const currency = order.currency || 'CZK';
@@ -87,7 +88,7 @@ const getRevenueWithoutVAT = (order) => {
 const deduplicateOrders = (orders) => {
   const seen = new Set();
   return orders.filter(o => {
-    const key = o.order_code || o.raw_data?.code || o.id;
+    const key = o.raw_data?.order_number || o.id;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
