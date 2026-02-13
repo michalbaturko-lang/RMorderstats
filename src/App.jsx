@@ -260,21 +260,25 @@ const Heatmap = ({ data, metric, onClick, groupDays, activeDays }) => {
   );
 };
 
-const CompareCard = ({ t1, v1, c1, t2, v2, c2, i1, i2, desc1, desc2 }) => {
+const CompareCard = ({ t1, v1, c1, r1, t2, v2, c2, r2, i1, i2, desc1, desc2 }) => {
   const w = v1 > v2 ? 1 : 2;
   return (
     <div className="grid grid-cols-2 gap-3">
       <div className={`rounded-xl p-4 transition-all ${w === 1 ? 'bg-blue-50 border-2 border-blue-400 shadow-md' : 'bg-slate-50 border border-slate-200'}`}>
         <div className="flex items-center gap-2 text-sm text-slate-600 mb-1">{i1} {t1}</div>
         {desc1 && <div className="text-xs text-slate-400 mb-2">{desc1}</div>}
+        <div className="text-xs text-slate-400 mb-0.5">Ø objednávka (bez DPH)</div>
         <div className="text-2xl font-bold text-slate-800">{formatCurrency(v1)}</div>
         <div className="text-xs text-slate-500 mt-1">{formatNumber(c1)} objednávek</div>
+        {r1 != null && <div className="text-xs text-slate-400 mt-0.5">Obrat: {formatCurrency(r1)}</div>}
       </div>
       <div className={`rounded-xl p-4 transition-all ${w === 2 ? 'bg-green-50 border-2 border-green-400 shadow-md' : 'bg-slate-50 border border-slate-200'}`}>
         <div className="flex items-center gap-2 text-sm text-slate-600 mb-1">{i2} {t2}</div>
         {desc2 && <div className="text-xs text-slate-400 mb-2">{desc2}</div>}
+        <div className="text-xs text-slate-400 mb-0.5">Ø objednávka (bez DPH)</div>
         <div className="text-2xl font-bold text-slate-800">{formatCurrency(v2)}</div>
         <div className="text-xs text-slate-500 mt-1">{formatNumber(c2)} objednávek</div>
+        {r2 != null && <div className="text-xs text-slate-400 mt-0.5">Obrat: {formatCurrency(r2)}</div>}
       </div>
     </div>
   );
@@ -754,9 +758,9 @@ export default function App() {
                 <strong>Velká města</strong> = krajská města + města nad 50 000 obyvatel<br/>
                 <strong>Menší města</strong> = ostatní obce a města
               </p>
-              <CompareCard 
-                t1="Velká města" v1={geoStats.big.aov} c1={geoStats.big.o}
-                t2="Menší města" v2={geoStats.small.aov} c2={geoStats.small.o}
+              <CompareCard
+                t1="Velká města" v1={geoStats.big.aov} c1={geoStats.big.o} r1={geoStats.big.r}
+                t2="Menší města" v2={geoStats.small.aov} c2={geoStats.small.o} r2={geoStats.small.r}
                 i1="🏙️" i2="🏘️"
                 desc1="Praha, Brno, Ostrava, Plzeň..."
                 desc2="Ostatní obce a města"
@@ -793,9 +797,9 @@ export default function App() {
                 <strong>B2B</strong> = objednávky na IČO (firemní zákazníci)<br/>
                 <strong>B2C</strong> = koncový spotřebitelé (bez IČO)
               </p>
-              <CompareCard 
-                t1="B2B (firmy)" v1={b2bStats.b2b.aov} c1={b2bStats.b2b.o}
-                t2="B2C (spotřebitelé)" v2={b2bStats.b2c.aov} c2={b2bStats.b2c.o}
+              <CompareCard
+                t1="B2B (firmy)" v1={b2bStats.b2b.aov} c1={b2bStats.b2b.o} r1={b2bStats.b2b.r}
+                t2="B2C (spotřebitelé)" v2={b2bStats.b2c.aov} c2={b2bStats.b2c.o} r2={b2bStats.b2c.r}
                 i1="🏢" i2="👤"
                 desc1="Objednávky na IČO"
                 desc2="Koncový spotřebitelé"
