@@ -120,11 +120,13 @@ const getDatePreset = (preset) => {
       return { from: formatDate(yesterday), to: formatDate(yesterday) };
     case 'this_week':
       const weekStart = new Date(today);
-      weekStart.setDate(today.getDate() - today.getDay() + 1);
+      const dayOfWeek = today.getDay() || 7; // Sunday (0) → 7 for Monday-based weeks
+      weekStart.setDate(today.getDate() - dayOfWeek + 1);
       return { from: formatDate(weekStart), to: formatDate(today) };
     case 'last_week':
       const lastWeekEnd = new Date(today);
-      lastWeekEnd.setDate(today.getDate() - today.getDay());
+      const currentDay = today.getDay() || 7;
+      lastWeekEnd.setDate(today.getDate() - currentDay);
       const lastWeekStart = new Date(lastWeekEnd);
       lastWeekStart.setDate(lastWeekEnd.getDate() - 6);
       return { from: formatDate(lastWeekStart), to: formatDate(lastWeekEnd) };
