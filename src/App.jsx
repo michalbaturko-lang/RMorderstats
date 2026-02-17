@@ -466,7 +466,7 @@ export default function App() {
 
       while (true) {
         const response = await fetch(
-          `${SUPABASE_URL}/rest/v1/orders?select=*&order_date=gte.${dateFrom}T00:00:00${tz}&order_date=lte.${dateTo}T23:59:59${tz}&order=order_date.desc&limit=${limit}&offset=${offset}`, 
+          `${SUPABASE_URL}/rest/v1/orders?select=*&order_date=gte.${dateFrom}T00:00:00${tz}&order_date=lte.${dateTo}T23:59:59${tz}&status=neq.STORNO&order=order_date.desc&limit=${limit}&offset=${offset}`,
           {
             headers: { 
               'apikey': SUPABASE_KEY, 
