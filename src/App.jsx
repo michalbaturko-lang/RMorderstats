@@ -98,6 +98,15 @@ const deduplicateOrders = (orders) => {
   });
 };
 
+// Filtr stornovaných objednávek (kontroluje status na top-level i v raw_data)
+const filterCancelled = (orders) => {
+  return orders.filter(o => {
+    const s1 = (o.status || '').toUpperCase();
+    const s2 = (o.raw_data?.status || '').toUpperCase();
+    return s1 !== 'STORNO' && s2 !== 'STORNO';
+  });
+};
+
 const formatNumber = (num) => Math.round(num).toLocaleString('cs-CZ');
 const formatCurrency = (num) => `${formatNumber(num)} Kč`;
 
@@ -466,7 +475,7 @@ export default function App() {
 
       while (true) {
         const response = await fetch(
-          `${SUPABASE_URL}/rest/v1/orders?select=*&order_date=gte.${dateFrom}T00:00:00${tz}&order_date=lte.${dateTo}T23:59:59${tz}&status=neq.STORNO&order=order_date.desc&limit=${limit}&offset=${offset}`,
+          `${SUPABASE_URL}/rest/v1/orders?select=*&order_date=gte.${dateFrom}T00:00:00${tz}&order_date=lte.${dateTo}T23:59:59${tz}&order=order_date.desc&limit=${limit}&offset=${offset}`,
           {
             headers: { 
               'apikey': SUPABASE_KEY, 
@@ -492,9 +501,13 @@ export default function App() {
     fetchAllOrders()
       .then(d => {
         const deduped = deduplicateOrders(d);
-        setOrders(deduped);
+        const clean = filterCancelled(deduped);
+        setOrders(clean);
         if (deduped.length < d.length) {
           console.warn(`⚠️ Deduplikace: ${d.length} → ${deduped.length} (odstraněno ${d.length - deduped.length} duplikátů)`);
+        }
+        if (clean.length < deduped.length) {
+          console.warn(`🚫 Storno filtr: ${deduped.length} → ${clean.length} (odstraněno ${deduped.length - clean.length} stornovaných)`);
         }
         setLoading(false);
       })
