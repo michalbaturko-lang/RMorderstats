@@ -5,7 +5,6 @@ const SUPABASE_URL = 'https://oonnawrfsbsbuijmfcqj.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9vbm5hd3Jmc2JzYnVpam1mY3FqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzMjA4ODcsImV4cCI6MjA4NTg5Njg4N30.d1jk1BYOc6eEx-KJzGpW3ekfDs4jxW10VgKmLef8f1Y';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-const ALLOWED_DOMAINS = ['regalmaster.cz', 'smartbidding.cz'];
 
 const LOADING_MESSAGES = [
   "🔧 Stavím regál...",
@@ -99,6 +98,15 @@ const deduplicateOrders = (orders) => {
   });
 };
 
+// Filtr stornovaných objednávek (kontroluje status na top-level i v raw_data)
+const filterCancelled = (orders) => {
+  return orders.filter(o => {
+    const s1 = (o.status || '').toUpperCase();
+    const s2 = (o.raw_data?.status || '').toUpperCase();
+    return s1 !== 'STORNO' && s2 !== 'STORNO';
+  });
+};
+
 const formatNumber = (num) => Math.round(num).toLocaleString('cs-CZ');
 const formatCurrency = (num) => `${formatNumber(num)} Kč`;
 
@@ -121,11 +129,13 @@ const getDatePreset = (preset) => {
       return { from: formatDate(yesterday), to: formatDate(yesterday) };
     case 'this_week':
       const weekStart = new Date(today);
-      weekStart.setDate(today.getDate() - today.getDay() + 1);
+      const dayOfWeek = today.getDay() || 7; // Sunday (0) → 7 for Monday-based weeks
+      weekStart.setDate(today.getDate() - dayOfWeek + 1);
       return { from: formatDate(weekStart), to: formatDate(today) };
     case 'last_week':
       const lastWeekEnd = new Date(today);
-      lastWeekEnd.setDate(today.getDate() - today.getDay());
+      const currentDay = today.getDay() || 7;
+      lastWeekEnd.setDate(today.getDate() - currentDay);
       const lastWeekStart = new Date(lastWeekEnd);
       lastWeekStart.setDate(lastWeekEnd.getDate() - 6);
       return { from: formatDate(lastWeekStart), to: formatDate(lastWeekEnd) };
@@ -361,7 +371,7 @@ const LoginPage = ({ onLogin, error: authError }) => (
         Přihlásit se přes Google
       </button>
       <p className="text-xs text-slate-400 mt-4">
-        Pouze pro @regalmaster.cz a @smartbidding.cz
+        🚀 Impérium to bude.
       </p>
     </div>
   </div>
@@ -379,12 +389,11 @@ export default function App() {
   const [tab, setTab] = useState('heatmap');
   const [cell, setCell] = useState(null);
   const [groupDays, setGroupDays] = useState(false);
-  const [activePreset, setActivePreset] = useState('last_30');
+  const [activePreset, setActivePreset] = useState('this_month');
   const [loadingMessage, setLoadingMessage] = useState(LOADING_MESSAGES[0]);
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date();
-    d.setDate(d.getDate() - 30);
-    return d.toISOString().split('T')[0];
+    return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0]);
 
@@ -392,27 +401,15 @@ export default function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
-        const domain = session.user.email?.split('@')[1];
-        if (ALLOWED_DOMAINS.includes(domain)) {
-          setUser(session.user);
-        } else {
-          supabase.auth.signOut();
-          setAuthError(`Email ${session.user.email} nemá přístup. Povolené domény: ${ALLOWED_DOMAINS.join(', ')}`);
-        }
+        setUser(session.user);
       }
       setAuthLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
-        const domain = session.user.email?.split('@')[1];
-        if (ALLOWED_DOMAINS.includes(domain)) {
-          setUser(session.user);
-          setAuthError(null);
-        } else {
-          supabase.auth.signOut();
-          setAuthError(`Email ${session.user.email} nemá přístup. Povolené domény: ${ALLOWED_DOMAINS.join(', ')}`);
-        }
+        setUser(session.user);
+        setAuthError(null);
       } else {
         setUser(null);
       }
@@ -478,7 +475,7 @@ export default function App() {
 
       while (true) {
         const response = await fetch(
-          `${SUPABASE_URL}/rest/v1/orders?select=*&order_date=gte.${dateFrom}T00:00:00${tz}&order_date=lte.${dateTo}T23:59:59${tz}&order=order_date.desc&limit=${limit}&offset=${offset}`, 
+          `${SUPABASE_URL}/rest/v1/orders?select=*&order_date=gte.${dateFrom}T00:00:00${tz}&order_date=lte.${dateTo}T23:59:59${tz}&order=order_date.desc&limit=${limit}&offset=${offset}`,
           {
             headers: { 
               'apikey': SUPABASE_KEY, 
@@ -504,9 +501,13 @@ export default function App() {
     fetchAllOrders()
       .then(d => {
         const deduped = deduplicateOrders(d);
-        setOrders(deduped);
+        const clean = filterCancelled(deduped);
+        setOrders(clean);
         if (deduped.length < d.length) {
           console.warn(`⚠️ Deduplikace: ${d.length} → ${deduped.length} (odstraněno ${d.length - deduped.length} duplikátů)`);
+        }
+        if (clean.length < deduped.length) {
+          console.warn(`🚫 Storno filtr: ${deduped.length} → ${clean.length} (odstraněno ${deduped.length - clean.length} stornovaných)`);
         }
         setLoading(false);
       })
@@ -586,12 +587,12 @@ export default function App() {
       
       if (big) { bigC.o++; bigC.r += r; } else { smallC.o++; smallC.r += r; }
       
-      if (!cities[city]) cities[city] = { n: city, o: 0, r: 0 }; 
-      cities[city].o++; 
+      if (!cities[city]) cities[city] = { n: city, o: 0, r: 0, big };
+      cities[city].o++;
       cities[city].r += r;
     });
     const top = Object.values(cities)
-      .filter(x => x.o >= 2)
+      .filter(x => x.o >= 2 && !x.big)
       .map(x => ({ ...x, aov: x.r / x.o }))
       .sort((a, b) => b.aov - a.aov)
       .slice(0, 8);
@@ -873,7 +874,8 @@ export default function App() {
               </InsightBox>
 
               <div className="mt-6">
-                <h3 className="text-sm font-semibold text-slate-700 mb-3">🏆 Top města podle AOV</h3>
+                <h3 className="text-sm font-semibold text-slate-700 mb-1">🏆 Top menší města podle AOV</h3>
+                <p className="text-xs text-slate-400 mb-3">Menší města (mimo krajská) s nejvyšší průměrnou objednávkou. Min. 2 objednávky, bez DPH a poštovného.</p>
                 <div className="space-y-2">
                   {geoStats.top.map((c, i) => (
                     <div key={i} className="flex justify-between items-center bg-slate-50 rounded-lg px-3 py-2">
