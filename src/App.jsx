@@ -52,7 +52,6 @@ const DAYS_FULL = ['Neděle', 'Pondělí', 'Úterý', 'Středa', 'Čtvrtek', 'P�
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const CURRENCY_RATES = { CZK: 1, EUR: 25.2, HUF: 0.063 };
 const MARKET_LABELS = { all: 'Všechny země', cz: 'Česko', sk: 'Slovensko', hu: 'Maďarsko', unknown: 'Neznámá země' };
-const MARKET_SHORT = { cz: 'CZ', sk: 'SK', hu: 'HU', unknown: '??' };
 
 const BIG_CITIES = {
   cz: ['praha', 'brno', 'ostrava', 'plzeň', 'plzen', 'liberec', 'olomouc', 'budějovic', 'budejovic', 'hradec králové', 'hradec', 'ústí nad labem', 'usti', 'pardubice', 'zlín', 'zlin', 'havířov', 'havirov', 'kladno', 'most', 'opava', 'frýdek', 'frydek', 'karviná', 'karvina', 'jihlava', 'teplice', 'děčín', 'decin', 'karlovy vary'],
@@ -534,8 +533,7 @@ export default function App() {
   const [groupDays, setGroupDays] = useState(false);
   const [showTimeline, setShowTimeline] = useState(true);
   const [tempoMarket, setTempoMarket] = useState('all');
-  const [tempoWeekday, setTempoWeekday] = useState('all');
-  const [tempoSelectedKey, setTempoSelectedKey] = useState(null);
+  const [tempoSelectedDayKey, setTempoSelectedDayKey] = useState(null);
   const [showTempoHistory, setShowTempoHistory] = useState(true);
   const [activePreset, setActivePreset] = useState('today');
   const [loadingMessage, setLoadingMessage] = useState(LOADING_MESSAGES[0]);
@@ -888,41 +886,108 @@ export default function App() {
     return [...preferred, ...rest];
   }, [tempoDailyRecords]);
 
-  const tempoFilteredRecords = useMemo(
-    () =>
-      tempoDailyRecords.filter(
-        (r) =>
-          (tempoMarket === 'all' || r.market === tempoMarket) &&
-          (tempoWeekday === 'all' || r.weekday === Number(tempoWeekday)),
-      ),
-    [tempoDailyRecords, tempoMarket, tempoWeekday],
+  const tempoRecordsByMarket = useMemo(
+    () => tempoDailyRecords.filter((r) => tempoMarket === 'all' || r.market === tempoMarket),
+    [tempoDailyRecords, tempoMarket],
+  );
+
+  const tempoDaySeries = useMemo(() => {
+    const byDate = new Map();
+
+    tempoRecordsByMarket.forEach((r) => {
+      if (!byDate.has(r.dateKey)) {
+        byDate.set(r.dateKey, {
+          key: r.dateKey,
+          dateKey: r.dateKey,
+          shortDate: r.shortDate,
+          fullDate: r.fullDate,
+          weekday: r.weekday,
+          weekdayLabel: r.weekdayLabel,
+          market: tempoMarket === 'all' ? 'all' : r.market,
+          ordersByHour: Array.from({ length: 24 }, () => 0),
+          revenueByHour: Array.from({ length: 24 }, () => 0),
+          ordersTotal: 0,
+          revenueTotal: 0,
+          marketsCount: 0,
+        });
+      }
+
+      const dayRow = byDate.get(r.dateKey);
+      for (let h = 0; h < 24; h++) {
+        dayRow.ordersByHour[h] += r.ordersByHour[h];
+        dayRow.revenueByHour[h] += r.revenueByHour[h];
+      }
+      dayRow.ordersTotal += r.ordersTotal;
+      dayRow.revenueTotal += r.revenueTotal;
+      dayRow.marketsCount += 1;
+    });
+
+    const findH50 = (hourlyValues, total) => {
+      if (!total) return null;
+      let cumulative = 0;
+      for (let hour = 0; hour < 24; hour++) {
+        cumulative += hourlyValues[hour];
+        if (cumulative / total >= 0.5) return hour;
+      }
+      return 23;
+    };
+
+    return Array.from(byDate.values())
+      .map((row) => {
+        let cumulativeOrders = 0;
+        let cumulativeRevenue = 0;
+        const hourly = HOURS.map((hour) => {
+          const orders = row.ordersByHour[hour];
+          const revenue = row.revenueByHour[hour];
+          cumulativeOrders += orders;
+          cumulativeRevenue += revenue;
+          return {
+            hour,
+            label: `${String(hour).padStart(2, '0')}:00 - ${String(hour).padStart(2, '0')}:59`,
+            orders,
+            revenue,
+            ordersSharePct: row.ordersTotal ? (orders / row.ordersTotal) * 100 : 0,
+            revenueSharePct: row.revenueTotal ? (revenue / row.revenueTotal) * 100 : 0,
+            cumOrdersPct: row.ordersTotal ? (cumulativeOrders / row.ordersTotal) * 100 : 0,
+            cumRevenuePct: row.revenueTotal ? (cumulativeRevenue / row.revenueTotal) * 100 : 0,
+          };
+        });
+
+        const h50Orders = findH50(row.ordersByHour, row.ordersTotal);
+        const h50Revenue = findH50(row.revenueByHour, row.revenueTotal);
+        return {
+          ...row,
+          hourly,
+          h50Orders,
+          h50Revenue,
+          deltaH50: h50Orders != null && h50Revenue != null ? h50Revenue - h50Orders : null,
+          xLabel: row.shortDate,
+        };
+      })
+      .sort((a, b) => b.dateKey.localeCompare(a.dateKey));
+  }, [tempoRecordsByMarket, tempoMarket]);
+
+  const tempoH50ByDayData = useMemo(
+    () => [...tempoDaySeries].sort((a, b) => a.dateKey.localeCompare(b.dateKey)),
+    [tempoDaySeries],
   );
 
   const tempoSelectedRecord = useMemo(
-    () => tempoFilteredRecords.find((r) => r.key === tempoSelectedKey) || tempoFilteredRecords[0] || null,
-    [tempoFilteredRecords, tempoSelectedKey],
+    () => tempoDaySeries.find((r) => r.key === tempoSelectedDayKey) || tempoDaySeries[0] || null,
+    [tempoDaySeries, tempoSelectedDayKey],
   );
 
-  const tempoTrendData = useMemo(() => {
-    return [...tempoFilteredRecords]
-      .sort((a, b) => a.dateKey.localeCompare(b.dateKey) || a.market.localeCompare(b.market))
-      .map((r) => ({
-        ...r,
-        xLabel: tempoMarket === 'all' ? `${r.shortDate} ${MARKET_SHORT[r.market] || r.market.toUpperCase()}` : r.shortDate,
-      }));
-  }, [tempoFilteredRecords, tempoMarket]);
-
   const tempoSummary = useMemo(() => {
-    const h50OrdersValues = tempoFilteredRecords.map((r) => r.h50Orders).filter((v) => v != null);
-    const h50RevenueValues = tempoFilteredRecords.map((r) => r.h50Revenue).filter((v) => v != null);
-    const deltaValues = tempoFilteredRecords.map((r) => r.deltaH50).filter((v) => v != null);
+    const h50OrdersValues = tempoDaySeries.map((r) => r.h50Orders).filter((v) => v != null);
+    const h50RevenueValues = tempoDaySeries.map((r) => r.h50Revenue).filter((v) => v != null);
+    const deltaValues = tempoDaySeries.map((r) => r.deltaH50).filter((v) => v != null);
     return {
-      days: tempoFilteredRecords.length,
+      days: tempoDaySeries.length,
       h50OrdersMedian: median(h50OrdersValues),
       h50RevenueMedian: median(h50RevenueValues),
       deltaMedian: median(deltaValues),
     };
-  }, [tempoFilteredRecords]);
+  }, [tempoDaySeries]);
 
   const tempoMatrixRows = useMemo(() => {
     const source = tempoDailyRecords.filter((r) => tempoMarket === 'all' || r.market === tempoMarket);
@@ -973,14 +1038,14 @@ export default function App() {
   }, [tempoAvailableMarkets, tempoMarket]);
 
   useEffect(() => {
-    if (!tempoFilteredRecords.length) {
-      setTempoSelectedKey(null);
+    if (!tempoDaySeries.length) {
+      setTempoSelectedDayKey(null);
       return;
     }
-    if (!tempoFilteredRecords.some((r) => r.key === tempoSelectedKey)) {
-      setTempoSelectedKey(tempoFilteredRecords[0].key);
+    if (!tempoDaySeries.some((r) => r.key === tempoSelectedDayKey)) {
+      setTempoSelectedDayKey(tempoDaySeries[0].key);
     }
-  }, [tempoFilteredRecords, tempoSelectedKey]);
+  }, [tempoDaySeries, tempoSelectedDayKey]);
 
   const geoStats = useMemo(() => {
     let bigC = { o: 0, r: 0 }, smallC = { o: 0, r: 0 };
@@ -1399,32 +1464,18 @@ export default function App() {
                       </option>
                     ))}
                   </select>
-                  <select
-                    value={tempoWeekday}
-                    onChange={(e) => setTempoWeekday(e.target.value)}
-                    className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                  >
-                    <option value="all">Všechny dny</option>
-                    <option value="1">Pondělí</option>
-                    <option value="2">Úterý</option>
-                    <option value="3">Středa</option>
-                    <option value="4">Čtvrtek</option>
-                    <option value="5">Pátek</option>
-                    <option value="6">Sobota</option>
-                    <option value="0">Neděle</option>
-                  </select>
                 </div>
               </div>
 
-              {!tempoFilteredRecords.length ? (
+              {!tempoDaySeries.length ? (
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                  Pro zvolené filtry nejsou dostupná data. Zkuste širší datum nebo jinou kombinaci země/dne v týdnu.
+                  Pro zvolené filtry nejsou dostupná data. Zkuste širší rozsah v horním datepickeru.
                 </div>
               ) : (
                 <>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                      <div className="text-xs text-slate-500 mb-1">Analyzovaných den×země segmentů</div>
+                      <div className="text-xs text-slate-500 mb-1">Analyzovaných dnů (z datepickeru)</div>
                       <div className="text-2xl font-bold text-slate-800">{formatNumber(tempoSummary.days)}</div>
                     </div>
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -1448,10 +1499,11 @@ export default function App() {
                       <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 mb-4">
                         <div>
                           <h3 className="text-sm font-semibold text-slate-800">
-                            Detail dne: {tempoSelectedRecord.fullDate} • {MARKET_LABELS[tempoSelectedRecord.market] || tempoSelectedRecord.market}
+                            Detail dne: {tempoSelectedRecord.fullDate} • {MARKET_LABELS[tempoMarket] || tempoMarket}
                           </h3>
                           <p className="text-xs text-slate-500">
                             {tempoSelectedRecord.weekdayLabel} • {formatNumber(tempoSelectedRecord.ordersTotal)} objednávek • {formatCurrency(tempoSelectedRecord.revenueTotal)} obratu
+                            {tempoMarket === 'all' && ` • Agregace ${tempoSelectedRecord.marketsCount} zemí`}
                           </p>
                         </div>
                         <div className="flex flex-wrap gap-2">
@@ -1560,8 +1612,8 @@ export default function App() {
                       className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-all"
                     >
                       <div className="text-left">
-                        <h3 className="text-sm font-semibold text-slate-800">📈 Historický trend H50</h3>
-                        <p className="text-xs text-slate-500">Kliknutím na bod v trendu vybereš konkrétní den do detailu výše.</p>
+                        <h3 className="text-sm font-semibold text-slate-800">📊 H50 po dnech ve zvoleném období</h3>
+                        <p className="text-xs text-slate-500">Každý den = jeden sloupec. Kliknutím na den vybereš detail nahoře.</p>
                       </div>
                       <span className="text-xs font-medium text-slate-600">{showTempoHistory ? 'Skrýt' : 'Zobrazit'}</span>
                     </button>
@@ -1571,15 +1623,15 @@ export default function App() {
                         <div className="h-72 rounded-lg border border-slate-200 bg-slate-50 p-2">
                           <ResponsiveContainer width="100%" height="100%">
                             <ComposedChart
-                              data={tempoTrendData}
+                              data={tempoH50ByDayData}
                               margin={{ top: 14, right: 16, left: 8, bottom: 6 }}
                               onClick={(state) => {
                                 const record = state?.activePayload?.[0]?.payload;
-                                if (record?.key) setTempoSelectedKey(record.key);
+                                if (record?.key) setTempoSelectedDayKey(record.key);
                               }}
                             >
                               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                              <XAxis dataKey="xLabel" tick={{ fontSize: 11, fill: '#64748b' }} minTickGap={18} />
+                              <XAxis dataKey="xLabel" tick={{ fontSize: 11, fill: '#64748b' }} minTickGap={14} />
                               <YAxis
                                 domain={[0, 23]}
                                 ticks={[0, 4, 8, 12, 16, 20, 23]}
@@ -1588,23 +1640,17 @@ export default function App() {
                               />
                               <RechartsTooltip content={({ active, payload }) => <TempoTrendTooltip active={active} payload={payload} />} />
                               <Legend wrapperStyle={{ fontSize: '12px' }} />
-                              <Line
-                                type="monotone"
+                              <Bar
                                 dataKey="h50Orders"
                                 name="H50 objednávky"
-                                stroke="#2563eb"
-                                strokeWidth={2.3}
-                                dot={{ r: 2 }}
-                                activeDot={{ r: 5 }}
+                                fill="#2563eb"
+                                radius={[4, 4, 0, 0]}
                               />
-                              <Line
-                                type="monotone"
+                              <Bar
                                 dataKey="h50Revenue"
                                 name="H50 obrat"
-                                stroke="#0f766e"
-                                strokeWidth={2.3}
-                                dot={{ r: 2 }}
-                                activeDot={{ r: 5 }}
+                                fill="#0f766e"
+                                radius={[4, 4, 0, 0]}
                               />
                             </ComposedChart>
                           </ResponsiveContainer>
@@ -1616,26 +1662,26 @@ export default function App() {
                               <thead className="sticky top-0 bg-slate-100 text-slate-600">
                                 <tr>
                                   <th className="text-left px-3 py-2 font-semibold">Datum</th>
-                                  <th className="text-left px-3 py-2 font-semibold">Země</th>
                                   <th className="text-right px-3 py-2 font-semibold">H50 obj.</th>
                                   <th className="text-right px-3 py-2 font-semibold">H50 obrat</th>
                                   <th className="text-right px-3 py-2 font-semibold">Objednávky</th>
+                                  <th className="text-right px-3 py-2 font-semibold">Obrat</th>
                                 </tr>
                               </thead>
                               <tbody>
-                                {[...tempoTrendData].reverse().map((row) => (
+                                {[...tempoH50ByDayData].reverse().map((row) => (
                                   <tr
                                     key={row.key}
-                                    onClick={() => setTempoSelectedKey(row.key)}
+                                    onClick={() => setTempoSelectedDayKey(row.key)}
                                     className={`border-t border-slate-100 cursor-pointer hover:bg-blue-50 ${
                                       tempoSelectedRecord?.key === row.key ? 'bg-blue-50/70' : 'odd:bg-white even:bg-slate-50/60'
                                     }`}
                                   >
                                     <td className="px-3 py-2 text-slate-700">{row.fullDate} ({row.weekdayLabel})</td>
-                                    <td className="px-3 py-2 text-slate-700">{MARKET_LABELS[row.market] || row.market}</td>
                                     <td className="px-3 py-2 text-right text-slate-700">{formatHourValue(row.h50Orders)}</td>
                                     <td className="px-3 py-2 text-right text-slate-700">{formatHourValue(row.h50Revenue)}</td>
                                     <td className="px-3 py-2 text-right font-medium text-slate-800">{formatNumber(row.ordersTotal)}</td>
+                                    <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.revenueTotal)}</td>
                                   </tr>
                                 ))}
                               </tbody>
