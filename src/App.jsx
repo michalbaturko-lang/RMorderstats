@@ -123,7 +123,6 @@ const filterCancelled = (orders) => {
 const formatNumber = (num) => Math.round(num).toLocaleString('cs-CZ');
 const formatCurrency = (num) => `${formatNumber(num)} Kč`;
 const formatPercent = (num) => `${num.toFixed(1)} %`;
-const formatPercentOrDash = (num) => (num == null ? '—' : formatPercent(num));
 const median = (values) => {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -417,22 +416,6 @@ const TempoTrendTooltip = ({ active, payload }) => {
   );
 };
 
-const AdsCostsTooltip = ({ active, payload }) => {
-  if (!active || !payload?.length) return null;
-  const row = payload[0].payload;
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-xl">
-      <div className="font-semibold text-slate-800">{row.fullDate}</div>
-      <div className="mt-1 text-slate-600">Obrat: <span className="font-semibold text-slate-800">{formatCurrency(row.revenue)}</span></div>
-      <div className="text-slate-600">Ads náklady: <span className="font-semibold text-slate-800">{formatCurrency(row.cost)}</span></div>
-      <div className="text-slate-600">Podíl nákladů na obratu: <span className="font-semibold text-slate-800">{formatPercentOrDash(row.costSharePct)}</span></div>
-      <div className="mt-1 text-slate-500">
-        CZ {formatCurrency(row.costCz)} • SK {formatCurrency(row.costSk)} • HU {formatCurrency(row.costHu)} • RO {formatCurrency(row.costRo)}
-      </div>
-    </div>
-  );
-};
-
 const CompareCard = ({ t1, v1, c1, r1, t2, v2, c2, r2, i1, i2, desc1, desc2 }) => {
   const w = v1 > v2 ? 1 : 2;
   return (
@@ -543,9 +526,6 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [orders, setOrders] = useState([]);
-  const [adsCosts, setAdsCosts] = useState([]);
-  const [adsCostsLoading, setAdsCostsLoading] = useState(false);
-  const [adsCostsError, setAdsCostsError] = useState(null);
   const [country, setCountry] = useState('all');
   const [metric, setMetric] = useState('orders');
   const [tab, setTab] = useState('heatmap');
@@ -677,40 +657,6 @@ export default function App() {
       .catch(e => { setError(e.message); setLoading(false); });
   }, [dateFrom, dateTo]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setAdsCostsLoading(true);
-    setAdsCostsError(null);
-
-    supabase
-      .from('ad_costs_daily')
-      .select('date, market, currency, cost_czk, cost_native, cost_micros, fetched_at')
-      .gte('date', dateFrom)
-      .lte('date', dateTo)
-      .order('date', { ascending: true })
-      .then(({ data, error: fetchError }) => {
-        if (cancelled) return;
-        if (fetchError) {
-          setAdsCosts([]);
-          setAdsCostsError(fetchError.message);
-        } else {
-          setAdsCosts(Array.isArray(data) ? data : []);
-        }
-      })
-      .catch((fetchError) => {
-        if (cancelled) return;
-        setAdsCosts([]);
-        setAdsCostsError(fetchError.message);
-      })
-      .finally(() => {
-        if (!cancelled) setAdsCostsLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [dateFrom, dateTo]);
-
   const filtered = useMemo(() => country === 'all' ? orders : orders.filter(o => o.market === country), [orders, country]);
 
   // Zjisti které dny jsou aktivní (mají data)
@@ -741,101 +687,6 @@ export default function App() {
       bigPct: cnt ? big / cnt * 100 : 0 
     };
   }, [filtered]);
-
-  const adsDailyRows = useMemo(() => {
-    const from = parseDateFromInput(dateFrom);
-    const to = parseDateFromInput(dateTo);
-    if (!from || !to || from > to) return [];
-
-    const revenueByDateMarket = new Map();
-    orders.forEach((o) => {
-      if (!o.order_date) return;
-      const dt = new Date(o.order_date);
-      if (Number.isNaN(dt.getTime())) return;
-      const dateKey = formatDateForInput(dt);
-      const market = o.market || 'unknown';
-      const key = `${dateKey}|${market}`;
-      revenueByDateMarket.set(key, (revenueByDateMarket.get(key) || 0) + getRevenueWithoutVAT(o));
-    });
-
-    const costByDateMarket = new Map();
-    adsCosts.forEach((row) => {
-      const dateKey = row.date;
-      const market = row.market || 'unknown';
-      const key = `${dateKey}|${market}`;
-      costByDateMarket.set(key, (costByDateMarket.get(key) || 0) + Number(row.cost_czk || 0));
-    });
-
-    const knownMarkets = ['cz', 'sk', 'hu', 'ro'];
-    const dynamicMarkets = new Set([
-      ...orders.map((o) => o.market || 'unknown'),
-      ...adsCosts.map((a) => a.market || 'unknown'),
-    ]);
-    const selectedMarkets = country === 'all'
-      ? Array.from(new Set([...knownMarkets, ...dynamicMarkets]))
-      : [country];
-
-    const rows = [];
-    const cursor = new Date(from);
-    while (cursor <= to) {
-      const dateKey = formatDateForInput(cursor);
-      const fullDate = cursor.toLocaleDateString('cs-CZ', { day: '2-digit', month: '2-digit', year: 'numeric' });
-      const label = cursor.toLocaleDateString('cs-CZ', { day: '2-digit', month: '2-digit' });
-
-      const revenue = selectedMarkets.reduce(
-        (sum, market) => sum + (revenueByDateMarket.get(`${dateKey}|${market}`) || 0),
-        0,
-      );
-      const cost = selectedMarkets.reduce(
-        (sum, market) => sum + (costByDateMarket.get(`${dateKey}|${market}`) || 0),
-        0,
-      );
-
-      const costCz = costByDateMarket.get(`${dateKey}|cz`) || 0;
-      const costSk = costByDateMarket.get(`${dateKey}|sk`) || 0;
-      const costHu = costByDateMarket.get(`${dateKey}|hu`) || 0;
-      const costRo = costByDateMarket.get(`${dateKey}|ro`) || 0;
-
-      rows.push({
-        dateKey,
-        label,
-        fullDate,
-        revenue,
-        cost,
-        costCz,
-        costSk,
-        costHu,
-        costRo,
-        costSharePct: revenue > 0 ? (cost / revenue) * 100 : null,
-      });
-
-      cursor.setDate(cursor.getDate() + 1);
-    }
-
-    return rows;
-  }, [orders, adsCosts, dateFrom, dateTo, country]);
-
-  const adsSummary = useMemo(() => {
-    const totalCost = adsDailyRows.reduce((sum, row) => sum + row.cost, 0);
-    const totalRevenue = adsDailyRows.reduce((sum, row) => sum + row.revenue, 0);
-    return {
-      totalCost,
-      totalRevenue,
-      costSharePct: totalRevenue > 0 ? (totalCost / totalRevenue) * 100 : null,
-      roas: totalCost > 0 ? totalRevenue / totalCost : null,
-      avgDailyCost: adsDailyRows.length ? totalCost / adsDailyRows.length : 0,
-    };
-  }, [adsDailyRows]);
-
-  const adsLastSync = useMemo(() => {
-    const timestamps = adsCosts
-      .map((row) => row.fetched_at)
-      .filter(Boolean)
-      .map((value) => new Date(value).getTime())
-      .filter((value) => Number.isFinite(value));
-    if (!timestamps.length) return null;
-    return new Date(Math.max(...timestamps));
-  }, [adsCosts]);
 
   const heatmap = useMemo(() => {
     const d = {};
@@ -1384,7 +1235,6 @@ export default function App() {
           {[
             { id: 'heatmap', l: '🗓️ Časová analýza' }, 
             { id: 'tempo', l: '⏱ Tempo dne' }, 
-            { id: 'ads', l: '💸 Ads náklady' }, 
             { id: 'geo', l: '📍 Geografie' }, 
             { id: 'b2b', l: '🏢 B2B / B2C' }
           ].map(t => (
@@ -1891,114 +1741,6 @@ export default function App() {
                         </table>
                       </div>
                     )}
-                  </div>
-                </>
-              )}
-            </>
-          )}
-
-          {tab === 'ads' && (
-            <>
-              <div className="mb-4">
-                <h2 className="text-lg font-semibold text-slate-800">💸 Google Ads náklady vs obrat</h2>
-                <p className="text-sm text-slate-500">
-                  Denní náklady v CZK + podíl nákladů na obratu. Vždy respektuje horní datepicker i filtr země.
-                </p>
-                <p className="text-xs text-slate-400 mt-1">
-                  {adsLastSync ? `Poslední sync Ads: ${adsLastSync.toLocaleString('cs-CZ')}` : 'Sync Ads zatím neproběhl nebo nejsou data.'}
-                </p>
-              </div>
-
-              {adsCostsError && (
-                <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">
-                  Ads náklady se nepodařilo načíst: {adsCostsError}
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-                <KPICard title="Ads náklady" value={formatCurrency(adsSummary.totalCost)} icon="💸" />
-                <KPICard title="% nákladů na obratu" value={formatPercentOrDash(adsSummary.costSharePct)} icon="📉" />
-                <KPICard title="ROAS (obrat / náklady)" value={adsSummary.roas == null ? '—' : `${adsSummary.roas.toFixed(2)}x`} icon="📈" />
-                <KPICard title="Průměr/den" value={formatCurrency(adsSummary.avgDailyCost)} icon="🗓️" sub={adsCostsLoading ? 'Načítám Ads data...' : null} />
-              </div>
-
-              {!adsDailyRows.length ? (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                  Pro zvolené období nejsou dostupná Ads data.
-                </div>
-              ) : (
-                <>
-                  <div className="h-80 rounded-xl border border-slate-200 bg-slate-50 p-2 mb-4">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ComposedChart data={adsDailyRows} margin={{ top: 14, right: 18, left: 8, bottom: 6 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                        <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#64748b' }} minTickGap={12} />
-                        <YAxis
-                          yAxisId="cost"
-                          tickFormatter={formatAxisCurrency}
-                          tick={{ fontSize: 11, fill: '#64748b' }}
-                        />
-                        <YAxis
-                          yAxisId="share"
-                          orientation="right"
-                          tickFormatter={(v) => `${Math.round(v)}%`}
-                          tick={{ fontSize: 11, fill: '#64748b' }}
-                        />
-                        <RechartsTooltip content={({ active, payload }) => <AdsCostsTooltip active={active} payload={payload} />} />
-                        <Legend wrapperStyle={{ fontSize: '12px' }} />
-                        <Bar
-                          yAxisId="cost"
-                          dataKey="cost"
-                          name="Ads náklady (Kč)"
-                          fill="#f59e0b"
-                          radius={[6, 6, 0, 0]}
-                        />
-                        <Line
-                          yAxisId="share"
-                          type="monotone"
-                          dataKey="costSharePct"
-                          name="% nákladů na obratu"
-                          stroke="#dc2626"
-                          strokeWidth={2.5}
-                          dot={false}
-                          activeDot={{ r: 4 }}
-                          connectNulls
-                        />
-                      </ComposedChart>
-                    </ResponsiveContainer>
-                  </div>
-
-                  <div className="rounded-lg border border-slate-200 overflow-hidden">
-                    <div className="max-h-80 overflow-auto">
-                      <table className="w-full text-xs">
-                        <thead className="sticky top-0 bg-slate-100 text-slate-600">
-                          <tr>
-                            <th className="text-left px-3 py-2 font-semibold">Den</th>
-                            <th className="text-right px-3 py-2 font-semibold">Obrat</th>
-                            <th className="text-right px-3 py-2 font-semibold">Ads náklady</th>
-                            <th className="text-right px-3 py-2 font-semibold">% nákladů/obratu</th>
-                            <th className="text-right px-3 py-2 font-semibold">CZ náklady</th>
-                            <th className="text-right px-3 py-2 font-semibold">SK náklady</th>
-                            <th className="text-right px-3 py-2 font-semibold">HU náklady</th>
-                            <th className="text-right px-3 py-2 font-semibold">RO náklady</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {[...adsDailyRows].reverse().map((row) => (
-                            <tr key={row.dateKey} className="border-t border-slate-100 odd:bg-white even:bg-slate-50/60">
-                              <td className="px-3 py-2 text-slate-700">{row.fullDate}</td>
-                              <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.revenue)}</td>
-                              <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.cost)}</td>
-                              <td className="px-3 py-2 text-right font-medium text-slate-800">{formatPercentOrDash(row.costSharePct)}</td>
-                              <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.costCz)}</td>
-                              <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.costSk)}</td>
-                              <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.costHu)}</td>
-                              <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.costRo)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
                   </div>
                 </>
               )}
