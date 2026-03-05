@@ -51,7 +51,7 @@ const DAYS = ['Ne', 'Po', 'Út', 'St', 'Čt', 'Pá', 'So'];
 const DAYS_FULL = ['Neděle', 'Pondělí', 'Úterý', 'Středa', 'Čtvrtek', 'Pátek', 'Sobota'];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const CURRENCY_RATES = { CZK: 1, EUR: 25.2, HUF: 0.063 };
-const MARKET_LABELS = { all: 'Všechny země', cz: 'Česko', sk: 'Slovensko', hu: 'Maďarsko', unknown: 'Neznámá země' };
+const MARKET_LABELS = { all: 'Všechny země', cz: 'Česko', sk: 'Slovensko', hu: 'Maďarsko', ro: 'Rumunsko', unknown: 'Neznámá země' };
 
 const BIG_CITIES = {
   cz: ['praha', 'brno', 'ostrava', 'plzeň', 'plzen', 'liberec', 'olomouc', 'budějovic', 'budejovic', 'hradec králové', 'hradec', 'ústí nad labem', 'usti', 'pardubice', 'zlín', 'zlin', 'havířov', 'havirov', 'kladno', 'most', 'opava', 'frýdek', 'frydek', 'karviná', 'karvina', 'jihlava', 'teplice', 'děčín', 'decin', 'karlovy vary'],
@@ -427,7 +427,7 @@ const AdsCostsTooltip = ({ active, payload }) => {
       <div className="text-slate-600">Ads náklady: <span className="font-semibold text-slate-800">{formatCurrency(row.cost)}</span></div>
       <div className="text-slate-600">Podíl nákladů na obratu: <span className="font-semibold text-slate-800">{formatPercentOrDash(row.costSharePct)}</span></div>
       <div className="mt-1 text-slate-500">
-        CZ {formatCurrency(row.costCz)} • SK {formatCurrency(row.costSk)} • HU {formatCurrency(row.costHu)}
+        CZ {formatCurrency(row.costCz)} • SK {formatCurrency(row.costSk)} • HU {formatCurrency(row.costHu)} • RO {formatCurrency(row.costRo)}
       </div>
     </div>
   );
@@ -766,7 +766,7 @@ export default function App() {
       costByDateMarket.set(key, (costByDateMarket.get(key) || 0) + Number(row.cost_czk || 0));
     });
 
-    const knownMarkets = ['cz', 'sk', 'hu'];
+    const knownMarkets = ['cz', 'sk', 'hu', 'ro'];
     const dynamicMarkets = new Set([
       ...orders.map((o) => o.market || 'unknown'),
       ...adsCosts.map((a) => a.market || 'unknown'),
@@ -794,6 +794,7 @@ export default function App() {
       const costCz = costByDateMarket.get(`${dateKey}|cz`) || 0;
       const costSk = costByDateMarket.get(`${dateKey}|sk`) || 0;
       const costHu = costByDateMarket.get(`${dateKey}|hu`) || 0;
+      const costRo = costByDateMarket.get(`${dateKey}|ro`) || 0;
 
       rows.push({
         dateKey,
@@ -804,6 +805,7 @@ export default function App() {
         costCz,
         costSk,
         costHu,
+        costRo,
         costSharePct: revenue > 0 ? (cost / revenue) * 100 : null,
       });
 
@@ -1978,6 +1980,7 @@ export default function App() {
                             <th className="text-right px-3 py-2 font-semibold">CZ náklady</th>
                             <th className="text-right px-3 py-2 font-semibold">SK náklady</th>
                             <th className="text-right px-3 py-2 font-semibold">HU náklady</th>
+                            <th className="text-right px-3 py-2 font-semibold">RO náklady</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1990,6 +1993,7 @@ export default function App() {
                               <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.costCz)}</td>
                               <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.costSk)}</td>
                               <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.costHu)}</td>
+                              <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.costRo)}</td>
                             </tr>
                           ))}
                         </tbody>

@@ -33,17 +33,25 @@ Set these repository secrets:
 
 Optional:
 
-- `FX_RATES_JSON` (default: `{"CZK":1,"EUR":25.2,"HUF":0.063}`)
+- `FX_RATES_JSON` (default: `{"CZK":1,"EUR":25.2,"HUF":0.063,"RON":5.1}`)
 
-Example `GOOGLE_ADS_ACCOUNTS_JSON`:
+Recommended `GOOGLE_ADS_ACCOUNTS_JSON` for your current setup:
 
 ```json
 [
-  { "market": "cz", "customerId": "1234567890" },
-  { "market": "sk", "customerId": "2345678901" },
-  { "market": "hu", "customerId": "3456789012" }
+  { "market": "cz", "customerId": "784-198-5650", "enabled": true },
+  { "market": "sk", "customerId": "257-933-8188", "enabled": true },
+  { "market": "hu", "customerId": "196-153-9480", "enabled": true },
+  { "market": "sk", "customerId": "176-019-1298", "enabled": false },
+  { "market": "ro", "customerId": "471-804-3625", "enabled": false }
 ]
 ```
+
+Notes:
+
+- `enabled: false` means the account is ignored by the sync.
+- When Romania launches, switch `enabled` on account `471-804-3625` to `true`.
+- You can also use `activeFrom` / `activeTo` per account if needed.
 
 ## 4) Run the workflow
 

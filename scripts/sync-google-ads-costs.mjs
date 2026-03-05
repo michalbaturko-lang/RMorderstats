@@ -18,7 +18,14 @@
  * - SYNC_DAYS_BACK (default: 14)
  * - SYNC_FROM_DATE (YYYY-MM-DD)
  * - SYNC_TO_DATE (YYYY-MM-DD)
- * - FX_RATES_JSON (default: {"CZK":1,"EUR":25.2,"HUF":0.063})
+ * - FX_RATES_JSON (default: {"CZK":1,"EUR":25.2,"HUF":0.063,"RON":5.1})
+ *
+ * Accounts JSON supports:
+ * - market (required, example: cz/sk/hu/ro)
+ * - customerId (required, can include dashes)
+ * - enabled (optional, default true)
+ * - activeFrom (optional, YYYY-MM-DD)
+ * - activeTo (optional, YYYY-MM-DD)
  */
 
 const REQUIRED_ENV_VARS = [
@@ -31,7 +38,8 @@ const REQUIRED_ENV_VARS = [
   'SUPABASE_SERVICE_ROLE_KEY',
 ];
 
-const DEFAULT_FX_RATES = { CZK: 1, EUR: 25.2, HUF: 0.063 };
+const DEFAULT_FX_RATES = { CZK: 1, EUR: 25.2, HUF: 0.063, RON: 5.1 };
+const SUPPORTED_MARKETS = new Set(['cz', 'sk', 'hu', 'ro', 'unknown']);
 
 function requireEnv(name) {
   const value = process.env[name];
@@ -74,6 +82,17 @@ function resolveDateRange() {
 
 function normalizeCustomerId(value) {
   return String(value || '').replace(/\D/g, '');
+}
+
+function isDateStringInRange(dateString, from, to) {
+  return dateString >= from && dateString <= to;
+}
+
+function isAccountActiveForRange(account, from, to) {
+  if (account.enabled === false) return false;
+  const activeFrom = account.activeFrom || '1900-01-01';
+  const activeTo = account.activeTo || '2999-12-31';
+  return !(activeTo < from || activeFrom > to);
 }
 
 async function fetchAccessToken() {
@@ -201,16 +220,37 @@ async function main() {
   const apiVersion = process.env.GOOGLE_ADS_API_VERSION || 'v23';
   const developerToken = requireEnv('GOOGLE_ADS_DEVELOPER_TOKEN');
   const loginCustomerId = normalizeCustomerId(process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || '');
-  const accounts = parseJsonEnv('GOOGLE_ADS_ACCOUNTS_JSON', []);
+  const rawAccounts = parseJsonEnv('GOOGLE_ADS_ACCOUNTS_JSON', []);
   const fxRates = parseJsonEnv('FX_RATES_JSON', DEFAULT_FX_RATES);
 
-  if (!Array.isArray(accounts) || !accounts.length) {
+  if (!Array.isArray(rawAccounts) || !rawAccounts.length) {
     throw new Error('GOOGLE_ADS_ACCOUNTS_JSON must be a non-empty JSON array');
   }
 
   const { from, to } = resolveDateRange();
   const supabaseUrl = requireEnv('SUPABASE_URL');
   const serviceRoleKey = requireEnv('SUPABASE_SERVICE_ROLE_KEY');
+
+  const accounts = rawAccounts
+    .map((account) => ({
+      ...account,
+      market: String(account.market || 'unknown').toLowerCase(),
+      customerId: normalizeCustomerId(account.customerId),
+    }))
+    .filter((account) => {
+      if (!account.customerId) {
+        throw new Error(`Invalid customerId in GOOGLE_ADS_ACCOUNTS_JSON for market "${account.market}"`);
+      }
+      if (!SUPPORTED_MARKETS.has(account.market)) {
+        throw new Error(`Unsupported market "${account.market}" in GOOGLE_ADS_ACCOUNTS_JSON`);
+      }
+      return isAccountActiveForRange(account, from, to);
+    });
+
+  if (!accounts.length) {
+    console.log('[sync-google-ads-costs] No active accounts for selected date range. Nothing to sync.');
+    return;
+  }
 
   console.log(`[sync-google-ads-costs] Start sync ${from} -> ${to} (${accounts.length} account(s))`);
 
@@ -219,11 +259,8 @@ async function main() {
   const rows = [];
 
   for (const account of accounts) {
-    const market = account.market || 'unknown';
-    const customerId = normalizeCustomerId(account.customerId);
-    if (!customerId) {
-      throw new Error(`Invalid customerId in GOOGLE_ADS_ACCOUNTS_JSON for market "${market}"`);
-    }
+    const market = account.market;
+    const customerId = account.customerId;
 
     const daily = await fetchAccountDailyCosts({
       accessToken,
@@ -236,8 +273,12 @@ async function main() {
     });
 
     for (const row of daily) {
+      if (!isDateStringInRange(row.date, from, to)) continue;
       const costNative = row.costMicros / 1_000_000;
-      const fxRate = fxRates[row.currency] ?? 1;
+      const fxRate = fxRates[row.currency];
+      if (fxRate == null) {
+        throw new Error(`Missing FX rate for currency "${row.currency}". Add it to FX_RATES_JSON.`);
+      }
       rows.push({
         date: row.date,
         market,

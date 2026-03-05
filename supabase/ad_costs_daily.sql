@@ -4,7 +4,7 @@ create extension if not exists pgcrypto;
 create table if not exists public.ad_costs_daily (
   id uuid primary key default gen_random_uuid(),
   date date not null,
-  market text not null check (market in ('cz', 'sk', 'hu', 'unknown')),
+  market text not null,
   account_customer_id text not null,
   currency text not null,
   cost_micros bigint not null check (cost_micros >= 0),
@@ -15,6 +15,13 @@ create table if not exists public.ad_costs_daily (
   updated_at timestamptz not null default now(),
   unique (date, market, account_customer_id)
 );
+
+alter table public.ad_costs_daily
+drop constraint if exists ad_costs_daily_market_check;
+
+alter table public.ad_costs_daily
+add constraint ad_costs_daily_market_check
+check (market in ('cz', 'sk', 'hu', 'ro', 'unknown'));
 
 create index if not exists ad_costs_daily_date_idx on public.ad_costs_daily (date);
 create index if not exists ad_costs_daily_market_idx on public.ad_costs_daily (market);
