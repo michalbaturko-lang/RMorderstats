@@ -102,16 +102,25 @@ const getRevenueWithoutVAT = (order) => {
 };
 
 // Výpočet marže (prodejní cena bez DPH − nákupní cena bez DPH)
-// buy_price z Upgates je S DPH, proto ho dělíme sazbou DPH
-const getMargin = (order) => {
+// Pokud existuje nahraný ceník (buyPriceMap), použije se jako zdroj pravdy (ceny jsou BEZ DPH).
+// Jinak fallback: buy_price z Upgates je S DPH, proto ho dělíme sazbou DPH.
+const getMargin = (order, buyPriceMap) => {
   const products = order.raw_data?.products || [];
   let margin = 0;
   products.forEach(p => {
     const sellPrice = parseFloat(p.price_without_vat || 0);
-    const vatRate = parseFloat(p.vat_rate || 21);
-    const buyPriceExVat = parseFloat(p.buy_price || 0) / (1 + vatRate / 100);
-    const buyTotal = buyPriceExVat * parseFloat(p.quantity || 1);
-    margin += sellPrice - buyTotal;
+    const qty = parseFloat(p.quantity || 1);
+    const code = p.code || '';
+    let buyPriceExVat;
+    if (buyPriceMap && code && buyPriceMap[code] != null) {
+      // Ceník nahraný uživatelem — cena je již BEZ DPH, za 1 kus
+      buyPriceExVat = buyPriceMap[code];
+    } else {
+      // Fallback: Upgates buy_price je S DPH
+      const vatRate = parseFloat(p.vat_rate || 21);
+      buyPriceExVat = parseFloat(p.buy_price || 0) / (1 + vatRate / 100);
+    }
+    margin += sellPrice - buyPriceExVat * qty;
   });
   const currency = order.currency || 'CZK';
   return margin * (CURRENCY_RATES[currency] || 1);
@@ -556,6 +565,12 @@ export default function App() {
   const [loadingMessage, setLoadingMessage] = useState(LOADING_MESSAGES[0]);
   const [dateFrom, setDateFrom] = useState(() => formatDateForInput(new Date()));
   const [dateTo, setDateTo] = useState(() => formatDateForInput(new Date()));
+  const [buyPriceMap, setBuyPriceMap] = useState(() => {
+    try {
+      const saved = localStorage.getItem('buyPriceMap');
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
 
   // Auth: listen for session changes
   useEffect(() => {
@@ -599,6 +614,49 @@ export default function App() {
     }, 2000);
     return () => clearInterval(interval);
   }, [loading]);
+
+  const handleBuyPriceCsv = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const text = evt.target.result;
+        const map = {};
+        let count = 0;
+        text.split(/\r?\n/).forEach((line, i) => {
+          if (i === 0 && /k[oó]d/i.test(line)) return; // skip header
+          // Support both comma and semicolon delimiters
+          const sep = line.includes(';') ? ';' : ',';
+          const parts = line.split(sep).map(s => s.trim().replace(/^["']|["']$/g, ''));
+          if (parts.length >= 2 && parts[0] && parts[1]) {
+            const code = parts[0];
+            const price = parseFloat(parts[1].replace(/\s/g, '').replace(',', '.'));
+            if (!isNaN(price)) {
+              map[code] = price;
+              count++;
+            }
+          }
+        });
+        if (count > 0) {
+          setBuyPriceMap(map);
+          localStorage.setItem('buyPriceMap', JSON.stringify(map));
+          alert(`Ceník nahrán: ${count} produktů`);
+        } else {
+          alert('CSV neobsahuje platná data. Očekávaný formát: kód produktu;cena bez DPH');
+        }
+      } catch (err) {
+        alert('Chyba při zpracování CSV: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const clearBuyPriceMap = () => {
+    setBuyPriceMap(null);
+    localStorage.removeItem('buyPriceMap');
+  };
 
   const applyPreset = (preset) => {
     const dates = getDatePreset(preset);
@@ -693,7 +751,7 @@ export default function App() {
     filtered.forEach(o => {
       cnt++;
       rev += getRevenueWithoutVAT(o);
-      mar += getMargin(o);
+      mar += getMargin(o, buyPriceMap);
       if (isB2B(o)) b2b++;
       if (isBigCity(o.raw_data?.customer?.city_invoice, o.market)) big++;
     });
@@ -706,7 +764,7 @@ export default function App() {
       b2bPct: cnt ? b2b / cnt * 100 : 0,
       bigPct: cnt ? big / cnt * 100 : 0
     };
-  }, [filtered]);
+  }, [filtered, buyPriceMap]);
 
   const heatmap = useMemo(() => {
     const d = {};
@@ -1179,6 +1237,19 @@ export default function App() {
             <p className="text-slate-500 text-sm">REGAL MASTER - Analýza objednávek (bez DPH a poštovného)</p>
           </div>
           <div className="flex items-center gap-3">
+            <label className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-all cursor-pointer">
+              {buyPriceMap ? `📋 Ceník (${Object.keys(buyPriceMap).length})` : '📋 Nahrát ceník'}
+              <input type="file" accept=".csv,.txt" onChange={handleBuyPriceCsv} className="hidden" />
+            </label>
+            {buyPriceMap && (
+              <button
+                onClick={clearBuyPriceMap}
+                className="px-2 py-1.5 rounded-lg text-xs font-medium bg-red-50 text-red-600 hover:bg-red-100 transition-all"
+                title="Smazat nahraný ceník"
+              >
+                ✕
+              </button>
+            )}
             <span className="text-xs text-slate-400">{user.email}</span>
             <button
               onClick={handleLogout}
