@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { createClient } from '@supabase/supabase-js';
 
 const genId = () => Math.random().toString(36).substr(2, 9);
 
@@ -375,7 +376,12 @@ const CategoryColumn = ({ category, items, onDrop, onRemove, onMoveToCategory, a
 // Main FinanceModule
 // ═══════════════════════════════════════════════════════════════════════════
 
-export default function FinanceModule({ supabaseUrl, supabaseKey, supabase, appOrders, onMonthChange }) {
+export default function FinanceModule({ supabaseUrl, supabaseKey }) {
+  // Own Supabase client - no dependency on parent App
+  const supabaseClient = useMemo(() => {
+    if (supabaseUrl && supabaseKey) return createClient(supabaseUrl, supabaseKey);
+    return null;
+  }, [supabaseUrl, supabaseKey]);
   const saved = useMemo(() => loadFinanceState(), []);
 
   const [selectedMonth, setSelectedMonth] = useState(saved?.selectedMonth || '2026-01');
@@ -415,26 +421,63 @@ export default function FinanceModule({ supabaseUrl, supabaseKey, supabase, appO
     }));
   }, [selectedMonth]);
 
-  // Notify parent App about month change so it fetches orders
+  // Fetch revenue directly via Supabase JS client
   useEffect(() => {
-    if (onMonthChange) onMonthChange(selectedMonth);
-  }, [selectedMonth, onMonthChange]);
+    if (!supabaseClient) return;
+    setLoadingRevenue(true);
+    setAutoRevenue(0);
 
-  // Calculate revenue from orders passed by parent App
-  useEffect(() => {
-    const monthOrders = appOrders?.[selectedMonth];
-    if (!monthOrders) {
-      setLoadingRevenue(true);
-      setAutoRevenue(0);
-      return;
+    const [year, month] = selectedMonth.split('-');
+    const dateFrom = `${year}-${month}-01T00:00:00`;
+    const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
+    const dateTo = `${year}-${month}-${String(lastDay).padStart(2, '0')}T23:59:59`;
+
+    async function fetchAllOrders() {
+      let allOrders = [];
+      let from = 0;
+      const pageSize = 1000;
+
+      while (true) {
+        const { data, error } = await supabaseClient
+          .from('orders')
+          .select('*')
+          .gte('order_date', dateFrom)
+          .lte('order_date', dateTo)
+          .order('order_date', { ascending: false })
+          .range(from, from + pageSize - 1);
+
+        if (error) throw new Error(error.message);
+        if (!data || data.length === 0) break;
+        allOrders = allOrders.concat(data);
+        from += pageSize;
+        if (data.length < pageSize) break;
+      }
+
+      // Deduplicate & filter cancelled (same logic as main App)
+      const seen = new Set();
+      return allOrders.filter(o => {
+        const key = o.raw_data?.order_number || o.id;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        const s1 = (o.status || '').toUpperCase();
+        const s2 = (o.raw_data?.status || '').toUpperCase();
+        return s1 !== 'STORNO' && s2 !== 'STORNO';
+      });
     }
 
-    let totalRevenue = 0;
-    monthOrders.forEach(o => { totalRevenue += getRevenueWithoutVAT(o); });
-    console.log(`Finance: ${selectedMonth} → ${monthOrders.length} orders, revenue = ${totalRevenue}`);
-    setAutoRevenue(totalRevenue);
-    setLoadingRevenue(false);
-  }, [selectedMonth, appOrders]);
+    fetchAllOrders()
+      .then(orders => {
+        let total = 0;
+        orders.forEach(o => { total += getRevenueWithoutVAT(o); });
+        console.log(`Finance: ${selectedMonth} → ${orders.length} orders, revenue = ${Math.round(total)} Kč`);
+        setAutoRevenue(total);
+        setLoadingRevenue(false);
+      })
+      .catch(err => {
+        console.error(`Finance revenue fetch FAILED for ${selectedMonth}:`, err);
+        setLoadingRevenue(false);
+      });
+  }, [selectedMonth, supabaseClient]);
 
   // Computed values
   const revenue = currentData.revenueManual !== null ? currentData.revenueManual : autoRevenue;
@@ -1043,10 +1086,10 @@ export default function FinanceModule({ supabaseUrl, supabaseKey, supabase, appO
       {/* Section 3: Operating Costs → HV3 */}
       <Section title={`Provozní náklady – ${selectedLabel}`} icon="🏢" badge={`HV3: ${formatCZK(hv3)}`}>
         <div className="pt-4">
-          {/* Two column layout: bank items left, categories right */}
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-            {/* LEFT: Available bank items (2 cols) */}
-            <div className="lg:col-span-2">
+          {/* Stacked layout: bank items on top, categories below */}
+          <div className="space-y-6">
+            {/* TOP: Available bank items */}
+            <div>
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-semibold text-slate-700">Bankovní výpisy</h3>
                 <div className="flex gap-1">
@@ -1301,8 +1344,8 @@ export default function FinanceModule({ supabaseUrl, supabaseKey, supabase, appO
               )}
             </div>
 
-            {/* RIGHT: Category columns (3 cols) */}
-            <div className="lg:col-span-3">
+            {/* BOTTOM: Category columns */}
+            <div>
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-semibold text-slate-700">
                   Náklady přiřazené k {selectedLabel}
@@ -1312,8 +1355,8 @@ export default function FinanceModule({ supabaseUrl, supabaseKey, supabase, appO
                 </span>
               </div>
 
-              {/* Category columns grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-3">
+              {/* Category columns grid - horizontal row */}
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-3">
                 {EXPENSE_CATEGORIES.map(cat => (
                   <CategoryColumn
                     key={cat.id}
