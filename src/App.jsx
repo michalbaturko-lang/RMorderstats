@@ -668,20 +668,27 @@ export default function App() {
           return;
         }
         setBuyPriceLoading(true);
+        console.log(`Ceník: uploading ${rows.length} rows to Supabase...`);
+        console.log('Sample row:', rows[0]);
         // Upsert do Supabase po dávkách (max 500 řádků)
+        let totalUpserted = 0;
         for (let i = 0; i < rows.length; i += 500) {
           const batch = rows.slice(i, i + 500);
-          const { error } = await supabase
+          const { data, error, status, statusText } = await supabase
             .from('buy_prices')
-            .upsert(batch, { onConflict: 'product_code' });
-          if (error) throw new Error(error.message);
+            .upsert(batch, { onConflict: 'product_code' })
+            .select();
+          console.log(`Batch ${i}-${i + batch.length}: status=${status} ${statusText}`, error ? `ERROR: ${error.message}` : `OK, ${data?.length || 0} rows`);
+          if (error) throw new Error(`Supabase upsert error (${status}): ${error.message} [hint: ${error.hint || 'none'}]`);
+          totalUpserted += data?.length || batch.length;
         }
         // Update local state
         const map = {};
         rows.forEach(r => { map[r.product_code] = r.price_without_vat; });
         setBuyPriceMap(prev => ({ ...prev, ...map }));
         setBuyPriceLoading(false);
-        alert(`Ceník uložen do Supabase: ${rows.length} produktů`);
+        console.log(`Ceník: ${totalUpserted} rows saved successfully`);
+        alert(`Ceník uložen do Supabase: ${totalUpserted} produktů`);
       } catch (err) {
         setBuyPriceLoading(false);
         alert('Chyba při ukládání ceníku: ' + err.message);
