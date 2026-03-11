@@ -565,12 +565,8 @@ export default function App() {
   const [loadingMessage, setLoadingMessage] = useState(LOADING_MESSAGES[0]);
   const [dateFrom, setDateFrom] = useState(() => formatDateForInput(new Date()));
   const [dateTo, setDateTo] = useState(() => formatDateForInput(new Date()));
-  const [buyPriceMap, setBuyPriceMap] = useState(() => {
-    try {
-      const saved = localStorage.getItem('buyPriceMap');
-      return saved ? JSON.parse(saved) : null;
-    } catch { return null; }
-  });
+  const [buyPriceMap, setBuyPriceMap] = useState(null);
+  const [buyPriceLoading, setBuyPriceLoading] = useState(false);
 
   // Auth: listen for session changes
   useEffect(() => {
@@ -606,6 +602,38 @@ export default function App() {
     setUser(null);
   };
 
+  // Load buy prices from Supabase
+  useEffect(() => {
+    if (!user) return;
+    async function loadBuyPrices() {
+      try {
+        let all = [];
+        let from = 0;
+        const pageSize = 1000;
+        while (true) {
+          const { data, error } = await supabase
+            .from('buy_prices')
+            .select('product_code,price_without_vat')
+            .range(from, from + pageSize - 1);
+          if (error) { console.error('buy_prices load error:', error.message); break; }
+          if (!data || data.length === 0) break;
+          all = all.concat(data);
+          from += pageSize;
+          if (data.length < pageSize) break;
+        }
+        if (all.length > 0) {
+          const map = {};
+          all.forEach(r => { map[r.product_code] = parseFloat(r.price_without_vat); });
+          setBuyPriceMap(map);
+          console.log(`Ceník načten ze Supabase: ${all.length} produktů`);
+        }
+      } catch (err) {
+        console.error('buy_prices load failed:', err);
+      }
+    }
+    loadBuyPrices();
+  }, [user]);
+
   // Rotate loading messages
   useEffect(() => {
     if (!loading) return;
@@ -619,43 +647,65 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
         const text = evt.target.result;
-        const map = {};
-        let count = 0;
+        const rows = [];
         text.split(/\r?\n/).forEach((line, i) => {
           if (i === 0 && /k[oó]d/i.test(line)) return; // skip header
-          // Support both comma and semicolon delimiters
           const sep = line.includes(';') ? ';' : ',';
           const parts = line.split(sep).map(s => s.trim().replace(/^["']|["']$/g, ''));
           if (parts.length >= 2 && parts[0] && parts[1]) {
             const code = parts[0];
             const price = parseFloat(parts[1].replace(/\s/g, '').replace(',', '.'));
             if (!isNaN(price)) {
-              map[code] = price;
-              count++;
+              rows.push({ product_code: code, price_without_vat: price });
             }
           }
         });
-        if (count > 0) {
-          setBuyPriceMap(map);
-          localStorage.setItem('buyPriceMap', JSON.stringify(map));
-          alert(`Ceník nahrán: ${count} produktů`);
-        } else {
+        if (rows.length === 0) {
           alert('CSV neobsahuje platná data. Očekávaný formát: kód produktu;cena bez DPH');
+          return;
         }
+        setBuyPriceLoading(true);
+        // Upsert do Supabase po dávkách (max 500 řádků)
+        for (let i = 0; i < rows.length; i += 500) {
+          const batch = rows.slice(i, i + 500);
+          const { error } = await supabase
+            .from('buy_prices')
+            .upsert(batch, { onConflict: 'product_code' });
+          if (error) throw new Error(error.message);
+        }
+        // Update local state
+        const map = {};
+        rows.forEach(r => { map[r.product_code] = r.price_without_vat; });
+        setBuyPriceMap(prev => ({ ...prev, ...map }));
+        setBuyPriceLoading(false);
+        alert(`Ceník uložen do Supabase: ${rows.length} produktů`);
       } catch (err) {
-        alert('Chyba při zpracování CSV: ' + err.message);
+        setBuyPriceLoading(false);
+        alert('Chyba při ukládání ceníku: ' + err.message);
       }
     };
     reader.readAsText(file);
     e.target.value = '';
   };
 
-  const clearBuyPriceMap = () => {
-    setBuyPriceMap(null);
-    localStorage.removeItem('buyPriceMap');
+  const clearBuyPriceMap = async () => {
+    if (!confirm('Opravdu smazat celý ceník ze Supabase?')) return;
+    try {
+      setBuyPriceLoading(true);
+      const { error } = await supabase
+        .from('buy_prices')
+        .delete()
+        .neq('product_code', '');
+      if (error) throw new Error(error.message);
+      setBuyPriceMap(null);
+      setBuyPriceLoading(false);
+    } catch (err) {
+      setBuyPriceLoading(false);
+      alert('Chyba při mazání ceníku: ' + err.message);
+    }
   };
 
   const applyPreset = (preset) => {
@@ -1237,9 +1287,9 @@ export default function App() {
             <p className="text-slate-500 text-sm">REGAL MASTER - Analýza objednávek (bez DPH a poštovného)</p>
           </div>
           <div className="flex items-center gap-3">
-            <label className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-all cursor-pointer">
-              {buyPriceMap ? `📋 Ceník (${Object.keys(buyPriceMap).length})` : '📋 Nahrát ceník'}
-              <input type="file" accept=".csv,.txt" onChange={handleBuyPriceCsv} className="hidden" />
+            <label className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer ${buyPriceLoading ? 'bg-slate-100 text-slate-400 border-slate-200' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'}`}>
+              {buyPriceLoading ? '⏳ Ukládám...' : buyPriceMap ? `📋 Ceník (${Object.keys(buyPriceMap).length})` : '📋 Nahrát ceník'}
+              <input type="file" accept=".csv,.txt" onChange={handleBuyPriceCsv} className="hidden" disabled={buyPriceLoading} />
             </label>
             {buyPriceMap && (
               <button
@@ -1317,7 +1367,12 @@ export default function App() {
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
           <KPICard title="Objednávky" value={formatNumber(kpis.orders)} icon="🛒" />
           <KPICard title="Obrat (bez DPH)" value={formatCurrency(kpis.revenue)} icon="💰" />
-          <KPICard title="Marže" value={formatCurrency(kpis.margin)} icon="📊" sub={`${kpis.marginPct.toFixed(1)} % z obratu`} />
+          <KPICard
+            title="Marže"
+            value={formatCurrency(kpis.margin)}
+            icon="📊"
+            sub={`${kpis.marginPct.toFixed(1)} % z obratu${buyPriceMap ? ' (ceník)' : ''}${kpis.margin < 0 ? ' ⚠️ záporná!' : ''}`}
+          />
           <KPICard title="Ø Objednávka" value={formatCurrency(kpis.aov)} icon="📦" />
           <KPICard title="B2B podíl" value={`${kpis.b2bPct.toFixed(0)}%`} icon="🏢" sub={`🏙️ Velká města: ${kpis.bigPct.toFixed(0)}%`} />
         </div>
