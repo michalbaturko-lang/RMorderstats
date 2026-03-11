@@ -1374,12 +1374,14 @@ export default function App() {
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
           <KPICard title="Objednávky" value={formatNumber(kpis.orders)} icon="🛒" />
           <KPICard title="Obrat (bez DPH)" value={formatCurrency(kpis.revenue)} icon="💰" />
-          <KPICard
-            title="Marže"
-            value={formatCurrency(kpis.margin)}
-            icon="📊"
-            sub={`${kpis.marginPct.toFixed(1)} % z obratu${buyPriceMap ? ' (ceník)' : ''}${kpis.margin < 0 ? ' ⚠️ záporná!' : ''}`}
-          />
+          {user?.email === 'michal.baturko@regalmaster.cz' && (
+            <KPICard
+              title="Marže"
+              value={formatCurrency(kpis.margin)}
+              icon="📊"
+              sub={`${kpis.marginPct.toFixed(1)} % z obratu${buyPriceMap ? ' (ceník)' : ''}${kpis.margin < 0 ? ' ⚠️ záporná!' : ''}`}
+            />
+          )}
           <KPICard title="Ø Objednávka" value={formatCurrency(kpis.aov)} icon="📦" />
           <KPICard title="B2B podíl" value={`${kpis.b2bPct.toFixed(0)}%`} icon="🏢" sub={`🏙️ Velká města: ${kpis.bigPct.toFixed(0)}%`} />
         </div>
