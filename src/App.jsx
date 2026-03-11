@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import FinanceModule from './FinanceModule';
 import {
   Bar,
   CartesianGrid,
@@ -1233,10 +1234,11 @@ export default function App() {
         {/* Tabs */}
         <div className="flex gap-1 bg-white p-1 rounded-xl shadow-sm border mb-4">
           {[
-            { id: 'heatmap', l: '🗓️ Časová analýza' }, 
-            { id: 'tempo', l: '⏱ Tempo dne' }, 
-            { id: 'geo', l: '📍 Geografie' }, 
-            { id: 'b2b', l: '🏢 B2B / B2C' }
+            { id: 'heatmap', l: '🗓️ Časová analýza' },
+            { id: 'tempo', l: '⏱ Tempo dne' },
+            { id: 'geo', l: '📍 Geografie' },
+            { id: 'b2b', l: '🏢 B2B / B2C' },
+            ...(user?.email === 'michal.baturko@regalmaster.cz' ? [{ id: 'finance', l: '💰 Finance' }] : [])
           ].map(t => (
             <button 
               key={t.id} 
@@ -1785,6 +1787,10 @@ export default function App() {
                 </div>
               </div>
             </>
+          )}
+
+          {tab === 'finance' && user?.email === 'michal.baturko@regalmaster.cz' && (
+            <FinanceModule supabaseUrl={SUPABASE_URL} supabaseKey={SUPABASE_KEY} />
           )}
 
           {tab === 'b2b' && (
