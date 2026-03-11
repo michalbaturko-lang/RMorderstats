@@ -201,173 +201,100 @@ const HVCard = ({ label, value, color, sub }) => {
   );
 };
 
-// ─── Category Column Component ───────────────────────────────────────────
-const CategoryColumn = ({ category, items, onDrop, onRemove, onMoveToCategory, allCategories, expandedVendors, toggleVendor }) => {
+// ─── Category Section Component (full-width, collapsible) ────────────────
+const CategorySection = ({ category, items, onDrop, onRemove, onMoveToCategory, allCategories }) => {
+  const [open, setOpen] = useState(true);
   const [dropActive, setDropActive] = useState(false);
 
   const colorMap = {
-    blue: { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', dropBg: 'bg-blue-100', badge: 'bg-blue-100 text-blue-800', header: 'bg-blue-500' },
-    amber: { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', dropBg: 'bg-amber-100', badge: 'bg-amber-100 text-amber-800', header: 'bg-amber-500' },
-    purple: { bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700', dropBg: 'bg-purple-100', badge: 'bg-purple-100 text-purple-800', header: 'bg-purple-500' },
-    emerald: { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', dropBg: 'bg-emerald-100', badge: 'bg-emerald-100 text-emerald-800', header: 'bg-emerald-500' },
-    slate: { bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-700', dropBg: 'bg-slate-100', badge: 'bg-slate-100 text-slate-800', header: 'bg-slate-500' },
+    blue: { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', dropBg: 'bg-blue-100', header: 'bg-blue-500', light: 'bg-blue-50/50' },
+    amber: { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', dropBg: 'bg-amber-100', header: 'bg-amber-500', light: 'bg-amber-50/50' },
+    purple: { bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700', dropBg: 'bg-purple-100', header: 'bg-purple-500', light: 'bg-purple-50/50' },
+    emerald: { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', dropBg: 'bg-emerald-100', header: 'bg-emerald-500', light: 'bg-emerald-50/50' },
+    slate: { bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-700', dropBg: 'bg-slate-100', header: 'bg-slate-500', light: 'bg-slate-50/50' },
   };
   const colors = colorMap[category.color] || colorMap.slate;
-
   const total = items.reduce((sum, i) => sum + i.amount, 0);
 
-  // Group items by normalized vendor
-  const vendorGroups = useMemo(() => {
-    const groups = {};
-    items.forEach(item => {
-      const vendor = normalizeVendor(item.description);
-      if (!groups[vendor]) groups[vendor] = { vendor, items: [], total: 0 };
-      groups[vendor].items.push(item);
-      groups[vendor].total += item.amount;
-    });
-    return Object.values(groups).sort((a, b) => b.total - a.total);
-  }, [items]);
-
-  const handleDragOver = useCallback((e) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    setDropActive(true);
-  }, []);
-
+  const handleDragOver = useCallback((e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropActive(true); }, []);
   const handleDragLeave = useCallback(() => setDropActive(false), []);
-
   const handleDrop = useCallback((e) => {
     e.preventDefault();
     setDropActive(false);
     const data = e.dataTransfer.getData('text/plain');
     if (data) {
-      try {
-        const parsed = JSON.parse(data);
-        onDrop(parsed.itemId, parsed.fromCategory, category.id);
-      } catch {
-        // Legacy: just itemId string from bank list
-        onDrop(data, null, category.id);
-      }
+      try { const p = JSON.parse(data); onDrop(p.itemId || p.groupItemIds, p.fromCategory, category.id); }
+      catch { onDrop(data, null, category.id); }
     }
   }, [onDrop, category.id]);
 
   return (
-    <div className={`rounded-xl border ${colors.border} overflow-hidden flex flex-col`}>
-      {/* Header */}
-      <div className={`${colors.header} text-white px-3 py-2 flex items-center justify-between`}>
+    <div
+      className={`rounded-lg border ${colors.border} overflow-hidden transition-all ${dropActive ? colors.dropBg : ''}`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* Header bar - always visible */}
+      <button
+        onClick={() => setOpen(!open)}
+        className={`w-full flex items-center justify-between px-4 py-2 ${colors.bg} hover:brightness-95 transition-all`}
+      >
         <div className="flex items-center gap-2">
           <span>{category.icon}</span>
-          <span className="text-sm font-semibold">{category.label}</span>
+          <span className="text-sm font-semibold text-slate-800">{category.label}</span>
+          <span className={`text-xs px-2 py-0.5 rounded-full ${colors.border} ${colors.text} font-medium`}>
+            {items.length} položek
+          </span>
         </div>
-        <span className="text-xs font-bold bg-white/20 px-2 py-0.5 rounded-full">
-          {formatCZK(total)}
-        </span>
-      </div>
+        <div className="flex items-center gap-3">
+          <span className={`text-sm font-bold ${colors.text}`}>{formatCZK(total)}</span>
+          <span className={`text-slate-400 text-xs transition-transform ${open ? 'rotate-180' : ''}`}>&#9660;</span>
+        </div>
+      </button>
 
-      {/* Drop zone */}
-      <div
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        className={`flex-1 min-h-[80px] p-2 transition-all ${dropActive ? colors.dropBg : colors.bg}`}
-      >
-        {vendorGroups.length === 0 && !dropActive && (
-          <div className={`text-center py-4 text-xs ${colors.text} opacity-50`}>
-            Přetáhněte sem
-          </div>
-        )}
-        {dropActive && vendorGroups.length === 0 && (
-          <div className={`text-center py-4 text-xs font-medium ${colors.text}`}>
-            Pustit pro přiřazení
-          </div>
-        )}
-
-        <div className="space-y-1">
-          {vendorGroups.map(group => {
-            const isExpanded = expandedVendors.has(`${category.id}:${group.vendor}`);
-            const hasMultiple = group.items.length > 1;
-
-            return (
-              <div key={group.vendor}>
-                {/* Vendor summary row */}
-                <div
-                  className={`flex items-center gap-2 px-2 py-1.5 rounded-lg bg-white border ${colors.border} shadow-sm ${hasMultiple ? 'cursor-pointer hover:shadow-md' : ''} transition-all`}
-                  draggable={!hasMultiple}
-                  onDragStart={!hasMultiple ? (e) => {
-                    const item = group.items[0];
-                    e.dataTransfer.setData('text/plain', JSON.stringify({ itemId: item.id, fromCategory: category.id }));
-                    e.dataTransfer.effectAllowed = 'move';
-                  } : undefined}
-                  onClick={hasMultiple ? () => toggleVendor(`${category.id}:${group.vendor}`) : undefined}
-                >
-                  {hasMultiple && (
-                    <span className={`text-[10px] ${colors.text} transition-transform ${isExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium text-slate-700 truncate">{group.vendor}</div>
-                    {hasMultiple && (
-                      <div className="text-[10px] text-slate-400">{group.items.length} položek</div>
-                    )}
-                  </div>
-                  <span className={`text-xs font-bold ${colors.text} whitespace-nowrap`}>{formatCZK(group.total)}</span>
-                  {/* Move to other category dropdown */}
-                  <select
-                    className="text-[10px] bg-transparent border-none text-slate-400 cursor-pointer w-5 appearance-none hover:text-slate-600"
-                    title="Přesunout do jiné kategorie"
-                    value=""
-                    onClick={e => e.stopPropagation()}
-                    onChange={e => {
-                      if (e.target.value) {
-                        group.items.forEach(item => onMoveToCategory(item.id, category.id, e.target.value));
-                        e.target.value = '';
-                      }
-                    }}
-                  >
-                    <option value="">&#8942;</option>
-                    {allCategories.filter(c => c.id !== category.id).map(c => (
-                      <option key={c.id} value={c.id}>{c.icon} {c.label}</option>
-                    ))}
-                    <option value="__remove__">&#10005; Odebrat</option>
-                  </select>
-                </div>
-
-                {/* Expanded items */}
-                {isExpanded && hasMultiple && (
-                  <div className="ml-4 mt-1 space-y-0.5">
-                    {group.items.map(item => (
-                      <div
-                        key={item.id}
-                        draggable
-                        onDragStart={e => {
-                          e.dataTransfer.setData('text/plain', JSON.stringify({ itemId: item.id, fromCategory: category.id }));
-                          e.dataTransfer.effectAllowed = 'move';
-                        }}
-                        className={`flex items-center gap-2 px-2 py-1 rounded bg-white/80 border ${colors.border} text-[11px] cursor-grab active:cursor-grabbing`}
-                      >
-                        <span className="text-slate-300">&#9776;</span>
-                        <div className="flex-1 min-w-0 truncate text-slate-600">{item.description}</div>
-                        <span className={`font-medium ${colors.text} whitespace-nowrap`}>{formatCZK(item.amount)}</span>
-                        <button
-                          onClick={() => onRemove(item.id)}
-                          className="text-slate-300 hover:text-red-500 transition-colors"
-                          title="Odebrat"
-                        >&#10005;</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Single item: show description below vendor if different */}
-                {!hasMultiple && group.items[0].description !== group.vendor && (
-                  <div className="ml-2 text-[10px] text-slate-400 truncate px-2 -mt-0.5 mb-0.5">
-                    {group.items[0].date && `${group.items[0].date} • `}{group.items[0].description.substring(0, 60)}
-                  </div>
-                )}
+      {/* Items list */}
+      {open && items.length > 0 && (
+        <div className="px-3 py-2 space-y-1">
+          {items.map(item => (
+            <div
+              key={item.id}
+              draggable
+              onDragStart={e => {
+                e.dataTransfer.setData('text/plain', JSON.stringify({ itemId: item.id, fromCategory: category.id }));
+                e.dataTransfer.effectAllowed = 'move';
+              }}
+              className="flex items-center gap-3 px-3 py-1.5 rounded-lg bg-white border border-slate-100 hover:border-slate-300 cursor-grab active:cursor-grabbing transition-all group"
+            >
+              <span className="text-slate-300 group-hover:text-slate-500 text-xs">&#9776;</span>
+              <div className="flex-1 min-w-0">
+                <span className="text-sm text-slate-700">{item.description}</span>
+                {item.date && <span className="text-xs text-slate-400 ml-2">{item.date}</span>}
               </div>
-            );
-          })}
+              <span className={`text-sm font-semibold ${colors.text} whitespace-nowrap`}>{formatCZK(item.amount)}</span>
+              <select
+                className="text-xs bg-transparent border border-slate-200 rounded px-1 py-0.5 text-slate-400 cursor-pointer hover:text-slate-600"
+                value=""
+                onClick={e => e.stopPropagation()}
+                onChange={e => { if (e.target.value) onMoveToCategory(item.id, category.id, e.target.value); }}
+              >
+                <option value="">Přesunout...</option>
+                {allCategories.filter(c => c.id !== category.id).map(c => (
+                  <option key={c.id} value={c.id}>{c.icon} {c.label}</option>
+                ))}
+                <option value="__remove__">&#10005; Odebrat</option>
+              </select>
+            </div>
+          ))}
         </div>
-      </div>
+      )}
+
+      {/* Empty drop hint */}
+      {open && items.length === 0 && (
+        <div className={`px-4 py-3 text-xs text-center ${colors.text} opacity-50`}>
+          {dropActive ? 'Pustit pro přiřazení' : 'Přetáhněte položky sem'}
+        </div>
+      )}
     </div>
   );
 };
@@ -1025,13 +952,38 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
                 {currentData.revenueManual !== null ? 'Manuální hodnota' : 'Automaticky z objednávek v Supabase'}
               </p>
             </div>
-            <CurrencyInput
-              label="Náklady na prodané zboží (nákupní cena)"
-              value={currentData.cogs}
-              onChange={val => updateCurrentData({ cogs: val })}
-              placeholder="0"
-              hint="Hodnotu najdeš v Upgates (tržby mínus marže)"
-            />
+            <div className="flex-1">
+              <label className="block text-xs text-slate-500 mb-1">Náklady na prodané zboží (nákupní cena)</label>
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type="number"
+                    value={currentData.cogs || ''}
+                    onChange={e => updateCurrentData({ cogs: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
+                    placeholder="0"
+                    className="w-full px-3 py-2 pr-10 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">Kč</span>
+                </div>
+                <span className="text-slate-400 text-xs">=</span>
+                <div className="relative w-24">
+                  <input
+                    type="number"
+                    value={revenue > 0 ? Math.round((currentData.cogs || 0) / revenue * 100) : ''}
+                    onChange={e => {
+                      const pct = parseFloat(e.target.value);
+                      if (!isNaN(pct) && revenue > 0) {
+                        updateCurrentData({ cogs: Math.round(revenue * pct / 100) });
+                      }
+                    }}
+                    placeholder="0"
+                    className="w-full px-3 py-2 pr-8 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">%</span>
+                </div>
+              </div>
+              <p className="text-xs text-slate-400 mt-1">Zadej Kč nebo % z tržeb. Hodnotu najdeš v Upgates (tržby mínus marže)</p>
+            </div>
           </div>
           <div className="flex items-center gap-3 bg-blue-50 rounded-lg p-3">
             <span className="text-blue-500 text-lg">&#8594;</span>
@@ -1355,10 +1307,10 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
                 </span>
               </div>
 
-              {/* Category columns grid - horizontal row */}
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-3">
+              {/* Category sections - full width, stacked */}
+              <div className="space-y-2 mb-3">
                 {EXPENSE_CATEGORIES.map(cat => (
-                  <CategoryColumn
+                  <CategorySection
                     key={cat.id}
                     category={cat}
                     items={categoryItems[cat.id] || []}
@@ -1366,8 +1318,6 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
                     onRemove={handleRemoveFromCategory}
                     onMoveToCategory={handleMoveToCategory}
                     allCategories={EXPENSE_CATEGORIES}
-                    expandedVendors={expandedVendors}
-                    toggleVendor={toggleVendor}
                   />
                 ))}
               </div>
