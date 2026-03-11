@@ -1,6 +1,18 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import FinanceModule from './FinanceModule';
+import {
+  Bar,
+  CartesianGrid,
+  ComposedChart,
+  Legend,
+  Line,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip as RechartsTooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 
 const SUPABASE_URL = 'https://oonnawrfsbsbuijmfcqj.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9vbm5hd3Jmc2JzYnVpam1mY3FqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzMjA4ODcsImV4cCI6MjA4NTg5Njg4N30.d1jk1BYOc6eEx-KJzGpW3ekfDs4jxW10VgKmLef8f1Y';
@@ -40,6 +52,7 @@ const DAYS = ['Ne', 'Po', 'Út', 'St', 'Čt', 'Pá', 'So'];
 const DAYS_FULL = ['Neděle', 'Pondělí', 'Úterý', 'Středa', 'Čtvrtek', 'Pátek', 'Sobota'];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const CURRENCY_RATES = { CZK: 1, EUR: 25.2, HUF: 0.063 };
+const MARKET_LABELS = { all: 'Všechny země', cz: 'Česko', sk: 'Slovensko', hu: 'Maďarsko', ro: 'Rumunsko', unknown: 'Neznámá země' };
 
 const BIG_CITIES = {
   cz: ['praha', 'brno', 'ostrava', 'plzeň', 'plzen', 'liberec', 'olomouc', 'budějovic', 'budejovic', 'hradec králové', 'hradec', 'ústí nad labem', 'usti', 'pardubice', 'zlín', 'zlin', 'havířov', 'havirov', 'kladno', 'most', 'opava', 'frýdek', 'frydek', 'karviná', 'karvina', 'jihlava', 'teplice', 'děčín', 'decin', 'karlovy vary'],
@@ -110,6 +123,43 @@ const filterCancelled = (orders) => {
 
 const formatNumber = (num) => Math.round(num).toLocaleString('cs-CZ');
 const formatCurrency = (num) => `${formatNumber(num)} Kč`;
+const formatPercent = (num) => `${num.toFixed(1)} %`;
+const median = (values) => {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+};
+const formatHourValue = (hour) => {
+  if (hour == null || Number.isNaN(hour)) return '—';
+  const whole = Math.floor(hour);
+  const minutes = Math.round((hour - whole) * 60);
+  return `${String(whole).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+};
+const getH50CellClass = (hour) => {
+  if (hour == null) return 'bg-slate-50 text-slate-400 border-slate-200';
+  if (hour <= 9) return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+  if (hour <= 11) return 'bg-lime-50 text-lime-700 border-lime-200';
+  if (hour <= 13) return 'bg-amber-50 text-amber-700 border-amber-200';
+  if (hour <= 15) return 'bg-orange-50 text-orange-700 border-orange-200';
+  return 'bg-rose-50 text-rose-700 border-rose-200';
+};
+const formatDateForInput = (d) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+const parseDateFromInput = (value) => {
+  const [year, month, day] = (value || '').split('-').map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+};
+const formatAxisCurrency = (num) => {
+  if (Math.abs(num) >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
+  if (Math.abs(num) >= 1000) return `${Math.round(num / 1000)}k`;
+  return `${Math.round(num)}`;
+};
 
 const getColorIntensity = (value, max) => {
   if (!max || !value) return 'bg-slate-100';
@@ -119,7 +169,7 @@ const getColorIntensity = (value, max) => {
 
 const getDatePreset = (preset) => {
   const today = new Date();
-  const formatDate = (d) => d.toISOString().split('T')[0];
+  const formatDate = (d) => formatDateForInput(d);
   
   switch (preset) {
     case 'today':
@@ -171,6 +221,12 @@ const KPICard = ({ title, value, icon, sub }) => (
 );
 
 const Heatmap = ({ data, metric, onClick, groupDays, activeDays }) => {
+  const [hoveredCell, setHoveredCell] = useState(null);
+
+  useEffect(() => {
+    setHoveredCell(null);
+  }, [groupDays, metric]);
+
   const max = useMemo(() => {
     let m = 0;
     if (groupDays) {
@@ -199,26 +255,112 @@ const Heatmap = ({ data, metric, onClick, groupDays, activeDays }) => {
     return val;
   };
 
+  const updateHoveredCell = (event, day, hour, cellData) => {
+    const dataForCell = cellData || { orders: 0, revenue: 0 };
+    const tooltipWidth = 220;
+    const tooltipHeight = 90;
+    const viewportPadding = 16;
+    const x = Math.min(event.clientX + 14, window.innerWidth - tooltipWidth - viewportPadding);
+    const y = Math.min(event.clientY + 14, window.innerHeight - tooltipHeight - viewportPadding);
+    const hourLabel = `${String(hour).padStart(2, '0')}:00 - ${String(hour).padStart(2, '0')}:59`;
+    setHoveredCell({
+      x: Math.max(viewportPadding, x),
+      y: Math.max(viewportPadding, y),
+      label: day === null ? `Celkem ${hourLabel}` : `${DAYS_FULL[day]} ${hourLabel}`,
+      orders: dataForCell.orders || 0,
+      revenue: dataForCell.revenue || 0,
+    });
+  };
+
+  const hoverTooltip = hoveredCell ? (
+    <div
+      className="fixed z-50 min-w-[210px] rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-white shadow-xl pointer-events-none"
+      style={{ left: hoveredCell.x, top: hoveredCell.y }}
+    >
+      <div className="font-semibold text-slate-100">{hoveredCell.label}</div>
+      <div className="mt-1 text-slate-200">Objednávky: <span className="font-semibold text-white">{formatNumber(hoveredCell.orders)}</span></div>
+      <div className="text-slate-200">Obrat (bez DPH/poštovného): <span className="font-semibold text-white">{formatCurrency(hoveredCell.revenue)}</span></div>
+    </div>
+  ) : null;
+
   if (groupDays) {
     return (
+      <>
+        <div className="overflow-x-auto">
+          <div className="min-w-[600px]">
+            <div className="flex">
+              <div className="w-16" />
+              {HOURS.map(h => (
+                <div key={h} className="flex-1 text-center text-[10px] text-slate-400">{h}</div>
+              ))}
+            </div>
+            <div className="flex items-center">
+              <div className="w-16 text-xs text-slate-500 font-medium">Celkem</div>
+              {HOURS.map(h => {
+                const hourData = data.grouped?.[h];
+                return (
+                  <div
+                    key={h}
+                    onClick={() => onClick(null, h, hourData)}
+                    onMouseEnter={(e) => updateHoveredCell(e, null, h, hourData)}
+                    onMouseMove={(e) => updateHoveredCell(e, null, h, hourData)}
+                    onMouseLeave={() => setHoveredCell(null)}
+                    className={`flex-1 aspect-square m-0.5 rounded cursor-pointer transition-all hover:ring-2 hover:ring-blue-400 hover:scale-110 ${getColorIntensity(hourData?.[metric], max)}`}
+                  />
+                );
+              })}
+            </div>
+            <div className="flex items-center justify-end mt-3 gap-1 text-[9px] text-slate-400">
+              <span>0</span>
+              {legendValues.map((val, i) => (
+                <React.Fragment key={i}>
+                  <div className={`w-4 h-4 rounded ${['bg-blue-100', 'bg-blue-200', 'bg-blue-300', 'bg-blue-400', 'bg-blue-500'][i]}`}></div>
+                  <span>{formatLegendValue(val)}</span>
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+        </div>
+        {hoverTooltip}
+      </>
+    );
+  }
+
+  return (
+    <>
       <div className="overflow-x-auto">
         <div className="min-w-[600px]">
           <div className="flex">
-            <div className="w-16" />
+            <div className="w-10" />
             {HOURS.map(h => (
               <div key={h} className="flex-1 text-center text-[10px] text-slate-400">{h}</div>
             ))}
           </div>
-          <div className="flex items-center">
-            <div className="w-16 text-xs text-slate-500 font-medium">Celkem</div>
-            {HOURS.map(h => (
-              <div 
-                key={h} 
-                onClick={() => onClick(null, h, data.grouped?.[h])}
-                className={`flex-1 aspect-square m-0.5 rounded cursor-pointer transition-all hover:ring-2 hover:ring-blue-400 hover:scale-110 ${getColorIntensity(data.grouped?.[h]?.[metric], max)}`} 
-              />
-            ))}
-          </div>
+          {[1,2,3,4,5,6,0].map(d => {
+            const isActive = activeDays.has(d);
+            return (
+              <div key={d} className={`flex items-center ${!isActive ? 'opacity-30' : ''}`}>
+                <div className="w-10 text-xs text-slate-500 font-medium">{DAYS[d]}</div>
+                {HOURS.map(h => {
+                  const hourData = data[d]?.[h];
+                  return (
+                    <div
+                      key={h}
+                      onClick={() => isActive && onClick(d, h, hourData)}
+                      onMouseEnter={(e) => isActive && updateHoveredCell(e, d, h, hourData)}
+                      onMouseMove={(e) => isActive && updateHoveredCell(e, d, h, hourData)}
+                      onMouseLeave={() => setHoveredCell(null)}
+                      className={`flex-1 aspect-square m-0.5 rounded transition-all ${
+                        isActive
+                          ? `cursor-pointer hover:ring-2 hover:ring-blue-400 hover:scale-110 ${getColorIntensity(hourData?.[metric], max)}`
+                          : 'bg-slate-50'
+                      }`}
+                    />
+                  );
+                })}
+              </div>
+            );
+          })}
           <div className="flex items-center justify-end mt-3 gap-1 text-[9px] text-slate-400">
             <span>0</span>
             {legendValues.map((val, i) => (
@@ -230,47 +372,47 @@ const Heatmap = ({ data, metric, onClick, groupDays, activeDays }) => {
           </div>
         </div>
       </div>
-    );
-  }
+      {hoverTooltip}
+    </>
+  );
+};
 
+const TimelineTooltip = ({ active, payload, mode }) => {
+  if (!active || !payload?.length) return null;
+  const row = payload[0].payload;
   return (
-    <div className="overflow-x-auto">
-      <div className="min-w-[600px]">
-        <div className="flex">
-          <div className="w-10" />
-          {HOURS.map(h => (
-            <div key={h} className="flex-1 text-center text-[10px] text-slate-400">{h}</div>
-          ))}
-        </div>
-        {[1,2,3,4,5,6,0].map(d => {
-          const isActive = activeDays.has(d);
-          return (
-            <div key={d} className={`flex items-center ${!isActive ? 'opacity-30' : ''}`}>
-              <div className="w-10 text-xs text-slate-500 font-medium">{DAYS[d]}</div>
-              {HOURS.map(h => (
-                <div 
-                  key={h} 
-                  onClick={() => isActive && onClick(d, h, data[d]?.[h])}
-                  className={`flex-1 aspect-square m-0.5 rounded transition-all ${
-                    isActive 
-                      ? `cursor-pointer hover:ring-2 hover:ring-blue-400 hover:scale-110 ${getColorIntensity(data[d]?.[h]?.[metric], max)}`
-                      : 'bg-slate-50'
-                  }`} 
-                />
-              ))}
-            </div>
-          );
-        })}
-        <div className="flex items-center justify-end mt-3 gap-1 text-[9px] text-slate-400">
-          <span>0</span>
-          {legendValues.map((val, i) => (
-            <React.Fragment key={i}>
-              <div className={`w-4 h-4 rounded ${['bg-blue-100', 'bg-blue-200', 'bg-blue-300', 'bg-blue-400', 'bg-blue-500'][i]}`}></div>
-              <span>{formatLegendValue(val)}</span>
-            </React.Fragment>
-          ))}
-        </div>
-      </div>
+    <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-xl">
+      <div className="font-semibold text-slate-800">{mode === 'hour' ? row.fullLabel : row.fullDate}</div>
+      <div className="mt-1 text-slate-600">Objednávky: <span className="font-semibold text-slate-800">{formatNumber(row.orders)}</span></div>
+      <div className="text-slate-600">Obrat (bez DPH/poštovného): <span className="font-semibold text-slate-800">{formatCurrency(row.revenue)}</span></div>
+    </div>
+  );
+};
+
+const TempoCurveTooltip = ({ active, payload }) => {
+  if (!active || !payload?.length) return null;
+  const row = payload[0].payload;
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-xl">
+      <div className="font-semibold text-slate-800">{row.label}</div>
+      <div className="mt-1 text-slate-600">Objednávky v hodině: <span className="font-semibold text-slate-800">{formatNumber(row.orders)}</span> ({formatPercent(row.ordersSharePct)})</div>
+      <div className="text-slate-600">Obrat v hodině: <span className="font-semibold text-slate-800">{formatCurrency(row.revenue)}</span> ({formatPercent(row.revenueSharePct)})</div>
+      <div className="mt-1 text-slate-600">Kumul. objednávky: <span className="font-semibold text-slate-800">{formatPercent(row.cumOrdersPct)}</span></div>
+      <div className="text-slate-600">Kumul. obrat: <span className="font-semibold text-slate-800">{formatPercent(row.cumRevenuePct)}</span></div>
+    </div>
+  );
+};
+
+const TempoTrendTooltip = ({ active, payload }) => {
+  if (!active || !payload?.length) return null;
+  const row = payload[0].payload;
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-xl">
+      <div className="font-semibold text-slate-800">{row.fullDate} • {MARKET_LABELS[row.market] || row.market}</div>
+      <div className="mt-1 text-slate-600">H50 objednávky: <span className="font-semibold text-slate-800">{formatHourValue(row.h50Orders)}</span></div>
+      <div className="text-slate-600">H50 obrat: <span className="font-semibold text-slate-800">{formatHourValue(row.h50Revenue)}</span></div>
+      <div className="text-slate-600">Objednávky/den: <span className="font-semibold text-slate-800">{formatNumber(row.ordersTotal)}</span></div>
+      <div className="text-slate-600">Obrat/den: <span className="font-semibold text-slate-800">{formatCurrency(row.revenueTotal)}</span></div>
     </div>
   );
 };
@@ -390,13 +532,14 @@ export default function App() {
   const [tab, setTab] = useState('heatmap');
   const [cell, setCell] = useState(null);
   const [groupDays, setGroupDays] = useState(false);
-  const [activePreset, setActivePreset] = useState('this_month');
+  const [showTimeline, setShowTimeline] = useState(true);
+  const [tempoMarket, setTempoMarket] = useState('all');
+  const [tempoSelectedDayKey, setTempoSelectedDayKey] = useState(null);
+  const [showTempoHistory, setShowTempoHistory] = useState(true);
+  const [activePreset, setActivePreset] = useState('today');
   const [loadingMessage, setLoadingMessage] = useState(LOADING_MESSAGES[0]);
-  const [dateFrom, setDateFrom] = useState(() => {
-    const d = new Date();
-    return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
-  });
-  const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0]);
+  const [dateFrom, setDateFrom] = useState(() => formatDateForInput(new Date()));
+  const [dateTo, setDateTo] = useState(() => formatDateForInput(new Date()));
 
   // Auth: listen for session changes
   useEffect(() => {
@@ -576,6 +719,334 @@ export default function App() {
     
     return d;
   }, [filtered]);
+
+  const timelineSeries = useMemo(() => {
+    const from = parseDateFromInput(dateFrom);
+    const to = parseDateFromInput(dateTo);
+    if (!from || !to || from > to) {
+      return { validRange: false, mode: 'day', data: [], totals: { orders: 0, revenue: 0 } };
+    }
+
+    const sameDay =
+      from.getFullYear() === to.getFullYear() &&
+      from.getMonth() === to.getMonth() &&
+      from.getDate() === to.getDate();
+
+    if (sameDay) {
+      const data = HOURS.map((h) => ({
+        id: `h-${h}`,
+        label: `${String(h).padStart(2, '0')}:00`,
+        fullLabel: `${String(h).padStart(2, '0')}:00 - ${String(h).padStart(2, '0')}:59`,
+        orders: 0,
+        revenue: 0,
+      }));
+
+      filtered.forEach((o) => {
+        if (!o.order_date) return;
+        const dt = new Date(o.order_date);
+        if (
+          dt.getFullYear() !== from.getFullYear() ||
+          dt.getMonth() !== from.getMonth() ||
+          dt.getDate() !== from.getDate()
+        ) {
+          return;
+        }
+        const h = dt.getHours();
+        data[h].orders += 1;
+        data[h].revenue += getRevenueWithoutVAT(o);
+      });
+
+      const totals = data.reduce(
+        (acc, row) => ({ orders: acc.orders + row.orders, revenue: acc.revenue + row.revenue }),
+        { orders: 0, revenue: 0 },
+      );
+
+      return { validRange: true, mode: 'hour', data, totals };
+    }
+
+    const data = [];
+    const byDay = new Map();
+    const cursor = new Date(from);
+    while (cursor <= to) {
+      const key = formatDateForInput(cursor);
+      const row = {
+        id: key,
+        key,
+        label: cursor.toLocaleDateString('cs-CZ', { day: '2-digit', month: '2-digit' }),
+        fullDate: cursor.toLocaleDateString('cs-CZ', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+        orders: 0,
+        revenue: 0,
+      };
+      data.push(row);
+      byDay.set(key, row);
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    filtered.forEach((o) => {
+      if (!o.order_date) return;
+      const dt = new Date(o.order_date);
+      const key = formatDateForInput(dt);
+      const row = byDay.get(key);
+      if (!row) return;
+      row.orders += 1;
+      row.revenue += getRevenueWithoutVAT(o);
+    });
+
+    const totals = data.reduce(
+      (acc, row) => ({ orders: acc.orders + row.orders, revenue: acc.revenue + row.revenue }),
+      { orders: 0, revenue: 0 },
+    );
+
+    return { validRange: true, mode: 'day', data, totals };
+  }, [filtered, dateFrom, dateTo]);
+
+  const tempoDailyRecords = useMemo(() => {
+    const byKey = new Map();
+
+    filtered.forEach((o) => {
+      if (!o.order_date) return;
+      const dt = new Date(o.order_date);
+      if (Number.isNaN(dt.getTime())) return;
+
+      const market = o.market || 'unknown';
+      const dateKey = formatDateForInput(dt);
+      const key = `${dateKey}|${market}`;
+      if (!byKey.has(key)) {
+        byKey.set(key, {
+          key,
+          dateKey,
+          shortDate: dt.toLocaleDateString('cs-CZ', { day: '2-digit', month: '2-digit' }),
+          fullDate: dt.toLocaleDateString('cs-CZ', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+          weekday: dt.getDay(),
+          weekdayLabel: DAYS_FULL[dt.getDay()],
+          market,
+          ordersByHour: Array.from({ length: 24 }, () => 0),
+          revenueByHour: Array.from({ length: 24 }, () => 0),
+          ordersTotal: 0,
+          revenueTotal: 0,
+        });
+      }
+
+      const row = byKey.get(key);
+      const hour = dt.getHours();
+      const revenue = getRevenueWithoutVAT(o);
+      row.ordersByHour[hour] += 1;
+      row.revenueByHour[hour] += revenue;
+      row.ordersTotal += 1;
+      row.revenueTotal += revenue;
+    });
+
+    const findH50 = (hourlyValues, total) => {
+      if (!total) return null;
+      let cumulative = 0;
+      for (let hour = 0; hour < 24; hour++) {
+        cumulative += hourlyValues[hour];
+        if (cumulative / total >= 0.5) return hour;
+      }
+      return 23;
+    };
+
+    return Array.from(byKey.values())
+      .map((row) => {
+        let cumulativeOrders = 0;
+        let cumulativeRevenue = 0;
+        const hourly = HOURS.map((hour) => {
+          const orders = row.ordersByHour[hour];
+          const revenue = row.revenueByHour[hour];
+          cumulativeOrders += orders;
+          cumulativeRevenue += revenue;
+          return {
+            hour,
+            label: `${String(hour).padStart(2, '0')}:00 - ${String(hour).padStart(2, '0')}:59`,
+            orders,
+            revenue,
+            ordersSharePct: row.ordersTotal ? (orders / row.ordersTotal) * 100 : 0,
+            revenueSharePct: row.revenueTotal ? (revenue / row.revenueTotal) * 100 : 0,
+            cumOrdersPct: row.ordersTotal ? (cumulativeOrders / row.ordersTotal) * 100 : 0,
+            cumRevenuePct: row.revenueTotal ? (cumulativeRevenue / row.revenueTotal) * 100 : 0,
+          };
+        });
+
+        const h50Orders = findH50(row.ordersByHour, row.ordersTotal);
+        const h50Revenue = findH50(row.revenueByHour, row.revenueTotal);
+        return {
+          ...row,
+          hourly,
+          h50Orders,
+          h50Revenue,
+          deltaH50: h50Orders != null && h50Revenue != null ? h50Revenue - h50Orders : null,
+        };
+      })
+      .sort((a, b) => b.dateKey.localeCompare(a.dateKey) || a.market.localeCompare(b.market));
+  }, [filtered]);
+
+  const tempoAvailableMarkets = useMemo(() => {
+    const markets = Array.from(new Set(tempoDailyRecords.map((r) => r.market)));
+    const preferred = ['cz', 'sk', 'hu', 'unknown'].filter((m) => markets.includes(m));
+    const rest = markets.filter((m) => !preferred.includes(m)).sort();
+    return [...preferred, ...rest];
+  }, [tempoDailyRecords]);
+
+  const tempoRecordsByMarket = useMemo(
+    () => tempoDailyRecords.filter((r) => tempoMarket === 'all' || r.market === tempoMarket),
+    [tempoDailyRecords, tempoMarket],
+  );
+
+  const tempoDaySeries = useMemo(() => {
+    const byDate = new Map();
+
+    tempoRecordsByMarket.forEach((r) => {
+      if (!byDate.has(r.dateKey)) {
+        byDate.set(r.dateKey, {
+          key: r.dateKey,
+          dateKey: r.dateKey,
+          shortDate: r.shortDate,
+          fullDate: r.fullDate,
+          weekday: r.weekday,
+          weekdayLabel: r.weekdayLabel,
+          market: tempoMarket === 'all' ? 'all' : r.market,
+          ordersByHour: Array.from({ length: 24 }, () => 0),
+          revenueByHour: Array.from({ length: 24 }, () => 0),
+          ordersTotal: 0,
+          revenueTotal: 0,
+          marketsCount: 0,
+        });
+      }
+
+      const dayRow = byDate.get(r.dateKey);
+      for (let h = 0; h < 24; h++) {
+        dayRow.ordersByHour[h] += r.ordersByHour[h];
+        dayRow.revenueByHour[h] += r.revenueByHour[h];
+      }
+      dayRow.ordersTotal += r.ordersTotal;
+      dayRow.revenueTotal += r.revenueTotal;
+      dayRow.marketsCount += 1;
+    });
+
+    const findH50 = (hourlyValues, total) => {
+      if (!total) return null;
+      let cumulative = 0;
+      for (let hour = 0; hour < 24; hour++) {
+        cumulative += hourlyValues[hour];
+        if (cumulative / total >= 0.5) return hour;
+      }
+      return 23;
+    };
+
+    return Array.from(byDate.values())
+      .map((row) => {
+        let cumulativeOrders = 0;
+        let cumulativeRevenue = 0;
+        const hourly = HOURS.map((hour) => {
+          const orders = row.ordersByHour[hour];
+          const revenue = row.revenueByHour[hour];
+          cumulativeOrders += orders;
+          cumulativeRevenue += revenue;
+          return {
+            hour,
+            label: `${String(hour).padStart(2, '0')}:00 - ${String(hour).padStart(2, '0')}:59`,
+            orders,
+            revenue,
+            ordersSharePct: row.ordersTotal ? (orders / row.ordersTotal) * 100 : 0,
+            revenueSharePct: row.revenueTotal ? (revenue / row.revenueTotal) * 100 : 0,
+            cumOrdersPct: row.ordersTotal ? (cumulativeOrders / row.ordersTotal) * 100 : 0,
+            cumRevenuePct: row.revenueTotal ? (cumulativeRevenue / row.revenueTotal) * 100 : 0,
+          };
+        });
+
+        const h50Orders = findH50(row.ordersByHour, row.ordersTotal);
+        const h50Revenue = findH50(row.revenueByHour, row.revenueTotal);
+        return {
+          ...row,
+          hourly,
+          h50Orders,
+          h50Revenue,
+          deltaH50: h50Orders != null && h50Revenue != null ? h50Revenue - h50Orders : null,
+          xLabel: row.shortDate,
+        };
+      })
+      .sort((a, b) => b.dateKey.localeCompare(a.dateKey));
+  }, [tempoRecordsByMarket, tempoMarket]);
+
+  const tempoH50ByDayData = useMemo(
+    () => [...tempoDaySeries].sort((a, b) => a.dateKey.localeCompare(b.dateKey)),
+    [tempoDaySeries],
+  );
+
+  const tempoSelectedRecord = useMemo(
+    () => tempoDaySeries.find((r) => r.key === tempoSelectedDayKey) || tempoDaySeries[0] || null,
+    [tempoDaySeries, tempoSelectedDayKey],
+  );
+
+  const tempoSummary = useMemo(() => {
+    const h50OrdersValues = tempoDaySeries.map((r) => r.h50Orders).filter((v) => v != null);
+    const h50RevenueValues = tempoDaySeries.map((r) => r.h50Revenue).filter((v) => v != null);
+    const deltaValues = tempoDaySeries.map((r) => r.deltaH50).filter((v) => v != null);
+    return {
+      days: tempoDaySeries.length,
+      h50OrdersMedian: median(h50OrdersValues),
+      h50RevenueMedian: median(h50RevenueValues),
+      deltaMedian: median(deltaValues),
+    };
+  }, [tempoDaySeries]);
+
+  const tempoMatrixRows = useMemo(() => {
+    const source = tempoDailyRecords.filter((r) => tempoMarket === 'all' || r.market === tempoMarket);
+    const byMarket = new Map();
+
+    source.forEach((row) => {
+      if (!byMarket.has(row.market)) byMarket.set(row.market, new Map());
+      const byWeekday = byMarket.get(row.market);
+      if (!byWeekday.has(row.weekday)) byWeekday.set(row.weekday, { orders: [], revenue: [], delta: [], count: 0 });
+      const bucket = byWeekday.get(row.weekday);
+      if (row.h50Orders != null) bucket.orders.push(row.h50Orders);
+      if (row.h50Revenue != null) bucket.revenue.push(row.h50Revenue);
+      if (row.deltaH50 != null) bucket.delta.push(row.deltaH50);
+      bucket.count += 1;
+    });
+
+    const marketOrder = ['cz', 'sk', 'hu', 'unknown'];
+    const marketKeys = Array.from(byMarket.keys()).sort((a, b) => {
+      const ai = marketOrder.indexOf(a);
+      const bi = marketOrder.indexOf(b);
+      if (ai === -1 && bi === -1) return a.localeCompare(b);
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+
+    return marketKeys.map((market) => {
+      const byWeekday = byMarket.get(market);
+      const cells = [1, 2, 3, 4, 5, 6, 0].map((weekday) => {
+        const bucket = byWeekday.get(weekday);
+        if (!bucket) return { weekday, count: 0, h50Orders: null, h50Revenue: null, delta: null };
+        return {
+          weekday,
+          count: bucket.count,
+          h50Orders: median(bucket.orders),
+          h50Revenue: median(bucket.revenue),
+          delta: median(bucket.delta),
+        };
+      });
+      return { market, cells };
+    });
+  }, [tempoDailyRecords, tempoMarket]);
+
+  useEffect(() => {
+    if (tempoMarket !== 'all' && !tempoAvailableMarkets.includes(tempoMarket)) {
+      setTempoMarket('all');
+    }
+  }, [tempoAvailableMarkets, tempoMarket]);
+
+  useEffect(() => {
+    if (!tempoDaySeries.length) {
+      setTempoSelectedDayKey(null);
+      return;
+    }
+    if (!tempoDaySeries.some((r) => r.key === tempoSelectedDayKey)) {
+      setTempoSelectedDayKey(tempoDaySeries[0].key);
+    }
+  }, [tempoDaySeries, tempoSelectedDayKey]);
 
   const geoStats = useMemo(() => {
     let bigC = { o: 0, r: 0 }, smallC = { o: 0, r: 0 };
@@ -764,6 +1235,7 @@ export default function App() {
         <div className="flex gap-1 bg-white p-1 rounded-xl shadow-sm border mb-4">
           {[
             { id: 'heatmap', l: '🗓️ Časová analýza' },
+            { id: 'tempo', l: '⏱ Tempo dne' },
             { id: 'geo', l: '📍 Geografie' },
             { id: 'b2b', l: '🏢 B2B / B2C' },
             ...(user?.email === 'michal.baturko@regalmaster.cz' ? [{ id: 'finance', l: '💰 Finance' }] : [])
@@ -850,6 +1322,429 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+              )}
+
+              <div className="mt-6 rounded-xl border border-slate-200 overflow-hidden">
+                <button
+                  onClick={() => setShowTimeline(prev => !prev)}
+                  className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-all"
+                >
+                  <div className="text-left">
+                    <h3 className="text-sm font-semibold text-slate-800">📈 Časová osa objednávek a obratu</h3>
+                    <p className="text-xs text-slate-500">
+                      {timelineSeries.mode === 'hour' ? '1 den: zobrazení po hodinách' : 'Více dní: zobrazení po dnech'}
+                    </p>
+                  </div>
+                  <span className="text-xs font-medium text-slate-600">
+                    {showTimeline ? 'Skrýt' : 'Zobrazit'}
+                  </span>
+                </button>
+
+                {showTimeline && (
+                  <div className="border-t border-slate-200 p-4 bg-white">
+                    {!timelineSeries.validRange ? (
+                      <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+                        Neplatný rozsah data. Datum OD musí být menší nebo stejné jako datum DO.
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex flex-wrap gap-2 mb-4">
+                          <div className="px-2.5 py-1 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-700">
+                            Režim: {timelineSeries.mode === 'hour' ? 'Po hodinách' : 'Po dnech'}
+                          </div>
+                          <div className="px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700">
+                            Objednávky: {formatNumber(timelineSeries.totals.orders)}
+                          </div>
+                          <div className="px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700">
+                            Obrat: {formatCurrency(timelineSeries.totals.revenue)}
+                          </div>
+                        </div>
+
+                        <div className="h-72 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <ComposedChart data={timelineSeries.data} margin={{ top: 14, right: 18, left: 8, bottom: 6 }}>
+                              <defs>
+                                <linearGradient id="ordersGradient" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.85} />
+                                  <stop offset="100%" stopColor="#3b82f6" stopOpacity={0.25} />
+                                </linearGradient>
+                              </defs>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                              <XAxis
+                                dataKey="label"
+                                tick={{ fontSize: 11, fill: '#64748b' }}
+                                minTickGap={timelineSeries.mode === 'hour' ? 6 : 20}
+                              />
+                              <YAxis
+                                yAxisId="orders"
+                                allowDecimals={false}
+                                tick={{ fontSize: 11, fill: '#64748b' }}
+                              />
+                              <YAxis
+                                yAxisId="revenue"
+                                orientation="right"
+                                tickFormatter={formatAxisCurrency}
+                                tick={{ fontSize: 11, fill: '#64748b' }}
+                              />
+                              <RechartsTooltip
+                                content={({ active, payload }) => (
+                                  <TimelineTooltip active={active} payload={payload} mode={timelineSeries.mode} />
+                                )}
+                              />
+                              <Legend wrapperStyle={{ fontSize: '12px' }} />
+                              <Bar
+                                yAxisId="orders"
+                                dataKey="orders"
+                                name="Objednávky"
+                                fill="url(#ordersGradient)"
+                                radius={[6, 6, 0, 0]}
+                              />
+                              <Line
+                                yAxisId="revenue"
+                                type="monotone"
+                                dataKey="revenue"
+                                name="Obrat (Kč)"
+                                stroke="#0f766e"
+                                strokeWidth={2.5}
+                                dot={false}
+                                activeDot={{ r: 4 }}
+                              />
+                            </ComposedChart>
+                          </ResponsiveContainer>
+                        </div>
+
+                        <div className="mt-4 rounded-lg border border-slate-200 overflow-hidden">
+                          <div className="max-h-56 overflow-auto">
+                            <table className="w-full text-xs">
+                              <thead className="sticky top-0 bg-slate-100 text-slate-600">
+                                <tr>
+                                  <th className="text-left px-3 py-2 font-semibold">{timelineSeries.mode === 'hour' ? 'Hodina' : 'Den'}</th>
+                                  <th className="text-right px-3 py-2 font-semibold">Objednávky</th>
+                                  <th className="text-right px-3 py-2 font-semibold">Obrat (bez DPH/poštovného)</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {timelineSeries.data.map((row) => (
+                                  <tr key={row.id} className="border-t border-slate-100 odd:bg-white even:bg-slate-50/60">
+                                    <td className="px-3 py-2 text-slate-700">{timelineSeries.mode === 'hour' ? row.fullLabel : row.fullDate}</td>
+                                    <td className="px-3 py-2 text-right text-slate-700">{formatNumber(row.orders)}</td>
+                                    <td className="px-3 py-2 text-right font-medium text-slate-800">{formatCurrency(row.revenue)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {tab === 'tempo' && (
+            <>
+              <div className="flex flex-col md:flex-row md:items-end justify-between gap-3 mb-4">
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-800">⏱ Tempo dne: kdy dosáhneme 50 % výkonu</h2>
+                  <p className="text-sm text-slate-500">
+                    Měříme kumulativní podíl objednávek a obratu v průběhu dne. Obrat je vždy bez DPH a poštovného.
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1">Respektuje aktivní filtr data a filtr země nahoře na stránce.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <select
+                    value={tempoMarket}
+                    onChange={(e) => setTempoMarket(e.target.value)}
+                    className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  >
+                    <option value="all">Všechny země</option>
+                    {tempoAvailableMarkets.map((m) => (
+                      <option key={m} value={m}>
+                        {MARKET_LABELS[m] || m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {!tempoDaySeries.length ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                  Pro zvolené filtry nejsou dostupná data. Zkuste širší rozsah v horním datepickeru.
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="text-xs text-slate-500 mb-1">Analyzovaných dnů (z datepickeru)</div>
+                      <div className="text-2xl font-bold text-slate-800">{formatNumber(tempoSummary.days)}</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="text-xs text-slate-500 mb-1">Medián H50 objednávky</div>
+                      <div className="text-2xl font-bold text-slate-800">{formatHourValue(tempoSummary.h50OrdersMedian)}</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="text-xs text-slate-500 mb-1">Medián H50 obrat</div>
+                      <div className="text-2xl font-bold text-slate-800">{formatHourValue(tempoSummary.h50RevenueMedian)}</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="text-xs text-slate-500 mb-1">Medián rozdílu (obrat - obj.)</div>
+                      <div className="text-2xl font-bold text-slate-800">
+                        {tempoSummary.deltaMedian == null ? '—' : `${tempoSummary.deltaMedian > 0 ? '+' : ''}${tempoSummary.deltaMedian.toFixed(1)} h`}
+                      </div>
+                    </div>
+                  </div>
+
+                  {tempoSelectedRecord && (
+                    <div className="rounded-xl border border-slate-200 p-4 mb-5">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 mb-4">
+                        <div>
+                          <h3 className="text-sm font-semibold text-slate-800">
+                            Detail dne: {tempoSelectedRecord.fullDate} • {MARKET_LABELS[tempoMarket] || tempoMarket}
+                          </h3>
+                          <p className="text-xs text-slate-500">
+                            {tempoSelectedRecord.weekdayLabel} • {formatNumber(tempoSelectedRecord.ordersTotal)} objednávek • {formatCurrency(tempoSelectedRecord.revenueTotal)} obratu
+                            {tempoMarket === 'all' && ` • Agregace ${tempoSelectedRecord.marketsCount} zemí`}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <div className="px-2.5 py-1 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-700">
+                            H50 objednávky: {formatHourValue(tempoSelectedRecord.h50Orders)}
+                          </div>
+                          <div className="px-2.5 py-1 rounded-lg bg-teal-50 border border-teal-200 text-xs text-teal-700">
+                            H50 obrat: {formatHourValue(tempoSelectedRecord.h50Revenue)}
+                          </div>
+                          <div className="px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700">
+                            Δ: {tempoSelectedRecord.deltaH50 == null ? '—' : `${tempoSelectedRecord.deltaH50 > 0 ? '+' : ''}${tempoSelectedRecord.deltaH50} h`}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="h-72 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <ComposedChart data={tempoSelectedRecord.hourly} margin={{ top: 12, right: 16, left: 8, bottom: 6 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                            <XAxis
+                              type="number"
+                              dataKey="hour"
+                              domain={[0, 23]}
+                              ticks={[0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22]}
+                              tickFormatter={(h) => String(h).padStart(2, '0')}
+                              tick={{ fontSize: 11, fill: '#64748b' }}
+                            />
+                            <YAxis
+                              domain={[0, 100]}
+                              tickFormatter={(v) => `${v}%`}
+                              tick={{ fontSize: 11, fill: '#64748b' }}
+                            />
+                            <ReferenceLine y={50} stroke="#94a3b8" strokeDasharray="5 5" label={{ value: '50 %', fill: '#64748b', position: 'insideTopRight' }} />
+                            {tempoSelectedRecord.h50Orders != null && (
+                              <ReferenceLine
+                                x={tempoSelectedRecord.h50Orders}
+                                stroke="#2563eb"
+                                strokeDasharray="4 4"
+                                label={{ value: `H50 obj ${formatHourValue(tempoSelectedRecord.h50Orders)}`, fill: '#2563eb', position: 'insideBottomLeft' }}
+                              />
+                            )}
+                            {tempoSelectedRecord.h50Revenue != null && (
+                              <ReferenceLine
+                                x={tempoSelectedRecord.h50Revenue}
+                                stroke="#0f766e"
+                                strokeDasharray="4 4"
+                                label={{ value: `H50 obrat ${formatHourValue(tempoSelectedRecord.h50Revenue)}`, fill: '#0f766e', position: 'insideTopLeft' }}
+                              />
+                            )}
+                            <RechartsTooltip content={({ active, payload }) => <TempoCurveTooltip active={active} payload={payload} />} />
+                            <Legend wrapperStyle={{ fontSize: '12px' }} />
+                            <Line
+                              type="monotone"
+                              dataKey="cumOrdersPct"
+                              name="Kumulativní objednávky (%)"
+                              stroke="#2563eb"
+                              strokeWidth={2.5}
+                              dot={false}
+                              activeDot={{ r: 4 }}
+                            />
+                            <Line
+                              type="monotone"
+                              dataKey="cumRevenuePct"
+                              name="Kumulativní obrat (%)"
+                              stroke="#0f766e"
+                              strokeWidth={2.5}
+                              dot={false}
+                              activeDot={{ r: 4 }}
+                            />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      </div>
+
+                      <div className="mt-4 rounded-lg border border-slate-200 overflow-hidden">
+                        <div className="max-h-52 overflow-auto">
+                          <table className="w-full text-xs">
+                            <thead className="sticky top-0 bg-slate-100 text-slate-600">
+                              <tr>
+                                <th className="text-left px-3 py-2 font-semibold">Hodina</th>
+                                <th className="text-right px-3 py-2 font-semibold">Obj. v hodině (%)</th>
+                                <th className="text-right px-3 py-2 font-semibold">Obrat v hodině (%)</th>
+                                <th className="text-right px-3 py-2 font-semibold">Kumul. obj. (%)</th>
+                                <th className="text-right px-3 py-2 font-semibold">Kumul. obrat (%)</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {tempoSelectedRecord.hourly.map((row) => (
+                                <tr key={row.hour} className="border-t border-slate-100 odd:bg-white even:bg-slate-50/60">
+                                  <td className="px-3 py-2 text-slate-700">{row.label}</td>
+                                  <td className="px-3 py-2 text-right text-slate-700">{formatPercent(row.ordersSharePct)}</td>
+                                  <td className="px-3 py-2 text-right text-slate-700">{formatPercent(row.revenueSharePct)}</td>
+                                  <td className="px-3 py-2 text-right text-slate-700">{formatPercent(row.cumOrdersPct)}</td>
+                                  <td className="px-3 py-2 text-right font-medium text-slate-800">{formatPercent(row.cumRevenuePct)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="rounded-xl border border-slate-200 overflow-hidden mb-5">
+                    <button
+                      onClick={() => setShowTempoHistory((prev) => !prev)}
+                      className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-all"
+                    >
+                      <div className="text-left">
+                        <h3 className="text-sm font-semibold text-slate-800">📊 H50 po dnech ve zvoleném období</h3>
+                        <p className="text-xs text-slate-500">Každý den = jeden sloupec. Kliknutím na den vybereš detail nahoře.</p>
+                      </div>
+                      <span className="text-xs font-medium text-slate-600">{showTempoHistory ? 'Skrýt' : 'Zobrazit'}</span>
+                    </button>
+
+                    {showTempoHistory && (
+                      <div className="border-t border-slate-200 p-4 bg-white">
+                        <div className="h-72 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <ComposedChart
+                              data={tempoH50ByDayData}
+                              margin={{ top: 14, right: 16, left: 8, bottom: 6 }}
+                              onClick={(state) => {
+                                const record = state?.activePayload?.[0]?.payload;
+                                if (record?.key) setTempoSelectedDayKey(record.key);
+                              }}
+                            >
+                              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                              <XAxis dataKey="xLabel" tick={{ fontSize: 11, fill: '#64748b' }} minTickGap={14} />
+                              <YAxis
+                                domain={[0, 23]}
+                                ticks={[0, 4, 8, 12, 16, 20, 23]}
+                                tickFormatter={(v) => `${String(v).padStart(2, '0')}:00`}
+                                tick={{ fontSize: 11, fill: '#64748b' }}
+                              />
+                              <RechartsTooltip content={({ active, payload }) => <TempoTrendTooltip active={active} payload={payload} />} />
+                              <Legend wrapperStyle={{ fontSize: '12px' }} />
+                              <Bar
+                                dataKey="h50Orders"
+                                name="H50 objednávky"
+                                fill="#2563eb"
+                                radius={[4, 4, 0, 0]}
+                              />
+                              <Bar
+                                dataKey="h50Revenue"
+                                name="H50 obrat"
+                                fill="#0f766e"
+                                radius={[4, 4, 0, 0]}
+                              />
+                            </ComposedChart>
+                          </ResponsiveContainer>
+                        </div>
+
+                        <div className="mt-4 rounded-lg border border-slate-200 overflow-hidden">
+                          <div className="max-h-56 overflow-auto">
+                            <table className="w-full text-xs">
+                              <thead className="sticky top-0 bg-slate-100 text-slate-600">
+                                <tr>
+                                  <th className="text-left px-3 py-2 font-semibold">Datum</th>
+                                  <th className="text-right px-3 py-2 font-semibold">H50 obj.</th>
+                                  <th className="text-right px-3 py-2 font-semibold">H50 obrat</th>
+                                  <th className="text-right px-3 py-2 font-semibold">Objednávky</th>
+                                  <th className="text-right px-3 py-2 font-semibold">Obrat</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {[...tempoH50ByDayData].reverse().map((row) => (
+                                  <tr
+                                    key={row.key}
+                                    onClick={() => setTempoSelectedDayKey(row.key)}
+                                    className={`border-t border-slate-100 cursor-pointer hover:bg-blue-50 ${
+                                      tempoSelectedRecord?.key === row.key ? 'bg-blue-50/70' : 'odd:bg-white even:bg-slate-50/60'
+                                    }`}
+                                  >
+                                    <td className="px-3 py-2 text-slate-700">{row.fullDate} ({row.weekdayLabel})</td>
+                                    <td className="px-3 py-2 text-right text-slate-700">{formatHourValue(row.h50Orders)}</td>
+                                    <td className="px-3 py-2 text-right text-slate-700">{formatHourValue(row.h50Revenue)}</td>
+                                    <td className="px-3 py-2 text-right font-medium text-slate-800">{formatNumber(row.ordersTotal)}</td>
+                                    <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.revenueTotal)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 p-4">
+                    <h3 className="text-sm font-semibold text-slate-800 mb-1">🧭 Porovnání dnů v týdnu × země (medián H50)</h3>
+                    <p className="text-xs text-slate-500 mb-3">
+                      Každá buňka ukazuje medián času dosažení 50 % objednávek (Obj) a 50 % obratu (Obrat). Čím pozdější hodina, tím je tempo dne pomalejší.
+                    </p>
+                    {!tempoMatrixRows.length ? (
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+                        Pro zvolené filtry není dost dat pro matici porovnání.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="min-w-[760px] w-full text-xs border-separate border-spacing-1">
+                          <thead>
+                            <tr className="text-slate-500">
+                              <th className="text-left px-2 py-1 font-semibold">Země</th>
+                              <th className="text-center px-2 py-1 font-semibold">Po</th>
+                              <th className="text-center px-2 py-1 font-semibold">Út</th>
+                              <th className="text-center px-2 py-1 font-semibold">St</th>
+                              <th className="text-center px-2 py-1 font-semibold">Čt</th>
+                              <th className="text-center px-2 py-1 font-semibold">Pá</th>
+                              <th className="text-center px-2 py-1 font-semibold">So</th>
+                              <th className="text-center px-2 py-1 font-semibold">Ne</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {tempoMatrixRows.map((row) => (
+                              <tr key={row.market}>
+                                <td className="px-2 py-2 text-slate-700 font-medium">{MARKET_LABELS[row.market] || row.market}</td>
+                                {row.cells.map((cell) => (
+                                  <td key={`${row.market}-${cell.weekday}`} className="px-1 py-1">
+                                    <div className={`rounded-lg border px-2 py-1.5 text-center ${getH50CellClass(cell.h50Revenue ?? cell.h50Orders)}`}>
+                                      {cell.count ? (
+                                        <>
+                                          <div className="font-semibold">Obj {formatHourValue(cell.h50Orders)}</div>
+                                          <div>Obrat {formatHourValue(cell.h50Revenue)}</div>
+                                          <div className="opacity-75">n={cell.count}</div>
+                                        </>
+                                      ) : (
+                                        <div className="font-semibold">—</div>
+                                      )}
+                                    </div>
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
             </>
           )}
