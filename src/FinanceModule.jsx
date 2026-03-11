@@ -367,86 +367,180 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
     });
   };
 
-  // CSV import handler
+  // Proper CSV line parser that handles quoted fields (e.g. "field;with;semicolons")
+  const parseCsvLine = (line, sep) => {
+    const fields = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          current += '"';
+          i++; // skip escaped quote
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (ch === sep && !inQuotes) {
+        fields.push(current.trim());
+        current = '';
+      } else {
+        current += ch;
+      }
+    }
+    fields.push(current.trim());
+    return fields;
+  };
+
+  // Parse Czech number format: "-98 387,08" → -98387.08
+  const parseCzechNumber = (str) => {
+    if (!str) return 0;
+    const cleaned = str.replace(/[^\d,.\-]/g, '').replace(',', '.');
+    return parseFloat(cleaned) || 0;
+  };
+
+  // CSV import handler - supports Fio banka, ČSOB, KB, Raiffeisen, mBank etc.
   const handleCsvImport = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
     reader.onload = (event) => {
-      const text = event.target.result;
-      const lines = text.split('\n');
+      let text = event.target.result;
+
+      // Some banks add BOM or extra whitespace
+      text = text.replace(/^\uFEFF/, '').trim();
+
+      const lines = text.split(/\r?\n/);
       const newItems = [];
 
-      // Try to detect separator (semicolon is common in Czech CSV)
-      const firstLine = lines[0] || '';
-      const sep = firstLine.includes(';') ? ';' : firstLine.includes('\t') ? '\t' : ',';
+      // Detect separator from first non-empty line
+      let headerLineIdx = 0;
+      for (let i = 0; i < Math.min(lines.length, 10); i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        // Fio banka sometimes has info lines before header; header usually contains "Datum"
+        const lower = line.toLowerCase();
+        if (lower.includes('datum') || lower.includes('date') || lower.includes('částka') || lower.includes('objem')) {
+          headerLineIdx = i;
+          break;
+        }
+        // If first line has many semicolons, it's likely the header
+        if (i === 0 && (line.match(/;/g) || []).length >= 3) {
+          headerLineIdx = 0;
+          break;
+        }
+      }
 
-      // Try to find header row and relevant columns
-      const headers = firstLine.split(sep).map(h => h.trim().toLowerCase().replace(/"/g, ''));
+      const headerLine = lines[headerLineIdx] || '';
+      const sep = (headerLine.match(/;/g) || []).length >= 2 ? ';'
+                : (headerLine.match(/\t/g) || []).length >= 2 ? '\t'
+                : ',';
 
-      // Common column patterns for Czech bank statements
-      const dateCol = headers.findIndex(h => /datum|date/.test(h));
-      const descCol = headers.findIndex(h => /popis|název|nazev|zpráva|zprava|detail|protiúčet|protiucet|příjemce|prijemce|description|text|pozn/.test(h));
-      const amountCol = headers.findIndex(h => /částka|castka|suma|amount|objem|hodnota/.test(h));
-      const typeCol = headers.findIndex(h => /typ|type|směr|smer/.test(h));
+      const headers = parseCsvLine(headerLine, sep).map(h => h.toLowerCase().replace(/"/g, ''));
 
-      // If no header detected, try positional parsing
-      const hasHeader = dateCol >= 0 || descCol >= 0 || amountCol >= 0;
-      const startRow = hasHeader ? 1 : 0;
+      // Find columns by name patterns
+      // Fio banka: "Datum";"ID pohybu";"Datum2";"Objem";"Měna";"Protiúčet";"Název protiúčtu";"Kód banky";"Název banky";"KS";"VS";"SS";"Poznámka";"Zpráva pro příjemce";"Typ";"Provedl";"Upřesnění";"Komentář";"BIC";"ID pokynu"
+      const dateCol = headers.findIndex(h => /^datum$|^date$/.test(h));
+      const amountCol = headers.findIndex(h => /objem|částka|castka|suma|amount|hodnota|čás/.test(h));
+      const currencyCol = headers.findIndex(h => /měna|mena|currency/.test(h));
+      const descCols = {
+        zprava: headers.findIndex(h => /zpráva|zprava|message/.test(h)),
+        poznamka: headers.findIndex(h => /poznámka|poznamka|komentář|komentar|note/.test(h)),
+        prijemce: headers.findIndex(h => /název proti|nazev proti|příjemce|prijemce|protiúčet|protiucet/.test(h)),
+        popis: headers.findIndex(h => /popis|description|detail|text/.test(h)),
+        typ: headers.findIndex(h => /^typ$|^type$/.test(h)),
+      };
+
+      const hasHeader = dateCol >= 0 || amountCol >= 0;
+      if (!hasHeader) {
+        alert('Nepodařilo se rozpoznat hlavičku CSV. Očekávám sloupce jako "Datum", "Objem"/"Částka", "Zpráva pro příjemce" atd.');
+        return;
+      }
+
+      const startRow = headerLineIdx + 1;
 
       for (let i = startRow; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
 
-        const cols = line.split(sep).map(c => c.trim().replace(/^"|"$/g, ''));
+        const cols = parseCsvLine(line, sep);
 
-        let date = '', description = '', amount = 0;
+        // Skip summary/footer rows (e.g. "Suma výdajů", "Počáteční stav", "Koncový stav")
+        const firstCol = (cols[0] || '').toLowerCase();
+        if (/suma |počáteční|koncový|celkem|zůstatek|balance/i.test(cols.join(' '))) continue;
 
-        if (hasHeader) {
-          date = dateCol >= 0 ? cols[dateCol] || '' : '';
-          description = descCol >= 0 ? cols[descCol] || '' : cols.slice(1, -1).join(' ').trim();
-          const rawAmount = amountCol >= 0 ? cols[amountCol] || '0' : cols[cols.length - 1] || '0';
-          amount = parseFloat(rawAmount.replace(/\s/g, '').replace(',', '.')) || 0;
+        const date = dateCol >= 0 ? cols[dateCol] || '' : '';
+        const rawAmount = amountCol >= 0 ? cols[amountCol] || '0' : '0';
+        const amount = parseCzechNumber(rawAmount);
+        const currency = currencyCol >= 0 ? (cols[currencyCol] || 'CZK').toUpperCase() : 'CZK';
+
+        // Build best description from available columns
+        // Priority: zpráva pro příjemce > poznámka > název protiúčtu > popis
+        let description = '';
+        const zpravaVal = descCols.zprava >= 0 ? (cols[descCols.zprava] || '').trim() : '';
+        const poznamkaVal = descCols.poznamka >= 0 ? (cols[descCols.poznamka] || '').trim() : '';
+        const prijemceVal = descCols.prijemce >= 0 ? (cols[descCols.prijemce] || '').trim() : '';
+        const popisVal = descCols.popis >= 0 ? (cols[descCols.popis] || '').trim() : '';
+        const typVal = descCols.typ >= 0 ? (cols[descCols.typ] || '').trim() : '';
+
+        // Use the most descriptive field
+        if (zpravaVal) {
+          description = zpravaVal;
+        } else if (poznamkaVal) {
+          description = poznamkaVal;
+        } else if (prijemceVal) {
+          description = prijemceVal;
+        } else if (popisVal) {
+          description = popisVal;
         } else {
-          // Guess: first col = date, middle = description, last = amount
-          if (cols.length >= 3) {
-            date = cols[0];
-            description = cols.slice(1, -1).join(' ').trim();
-            amount = parseFloat(cols[cols.length - 1].replace(/\s/g, '').replace(',', '.')) || 0;
-          } else if (cols.length === 2) {
-            description = cols[0];
-            amount = parseFloat(cols[1].replace(/\s/g, '').replace(',', '.')) || 0;
-          }
+          // Fallback: concatenate non-empty interesting fields
+          description = [prijemceVal, poznamkaVal, typVal].filter(Boolean).join(' | ') || `Řádek ${i + 1}`;
         }
 
-        // Only import expense items (negative amounts or all if positive)
-        // Bank statements often use negative for expenses
-        if (description && amount !== 0) {
-          newItems.push({
-            id: genId(),
-            date,
-            description,
-            amount: Math.abs(amount),
-            source: csvSource,
-            adsRelated: isAdsRelated(description),
-            isExpense: amount < 0,
-          });
+        // Clean up description: remove "Nákup: " prefix for cleaner display
+        description = description.replace(/^Nákup:\s*/i, '');
+
+        // Truncate very long descriptions
+        if (description.length > 100) {
+          description = description.substring(0, 97) + '...';
         }
+
+        if (amount === 0) continue;
+
+        newItems.push({
+          id: genId(),
+          date,
+          description,
+          amount: Math.abs(amount),
+          source: csvSource,
+          adsRelated: isAdsRelated(description),
+          isExpense: amount < 0,
+          currency,
+          type: typVal,
+        });
       }
 
       if (newItems.length > 0) {
-        // By default only import expenses (negative amounts), but if all are positive, import all
+        // Only import expenses (negative amounts)
         const hasNegative = newItems.some(i => i.isExpense);
         const toImport = hasNegative ? newItems.filter(i => i.isExpense) : newItems;
-        const cleaned = toImport.map(({ isExpense, ...rest }) => rest);
+        const cleaned = toImport.map(({ isExpense, currency, type, ...rest }) => rest);
         setBankItems(prev => [...prev, ...cleaned]);
         setShowCsvImport(false);
-        alert(`Importováno ${cleaned.length} položek z CSV.`);
+
+        const skipped = newItems.length - cleaned.length;
+        const adsCount = cleaned.filter(i => i.adsRelated).length;
+        let msg = `Importováno ${cleaned.length} výdajových položek.`;
+        if (skipped > 0) msg += ` (${skipped} příjmových přeskočeno)`;
+        if (adsCount > 0) msg += ` ${adsCount} reklamních označeno.`;
+        alert(msg);
       } else {
-        alert('Nepodařilo se najít žádné položky v CSV. Zkontrolujte formát souboru.');
+        alert('Nepodařilo se najít žádné výdajové položky v CSV. Zkontrolujte formát souboru.');
       }
     };
+
+    // Try UTF-8 first, fallback to Windows-1250 (common for Czech banks)
     reader.readAsText(file, 'UTF-8');
     // Reset the input
     e.target.value = '';
@@ -745,7 +839,7 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
               {showCsvImport && (
                 <div className="bg-emerald-50 rounded-lg p-3 mb-2 border border-emerald-200">
                   <p className="text-xs text-slate-600 mb-2">
-                    Nahrajte CSV soubor z bankovního výpisu. Automaticky rozpoznám sloupce (datum, popis, částka).
+                    Nahrajte CSV z Fio banky nebo jiné banky. Automaticky rozpoznám sloupce a importuji výdaje.
                   </p>
                   <div className="flex items-center gap-2 mb-2">
                     <select
@@ -768,7 +862,7 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
                     />
                   </label>
                   <p className="text-[10px] text-slate-400 mt-2">
-                    Podporované formáty: CSV (středník/čárka/tabulátor). Kódování: UTF-8. Reklamní platby (Google, Facebook, Sklik) budou automaticky označeny.
+                    Fio banka, ČSOB, KB, Raiffeisen... Importují se pouze výdaje (záporné částky). Reklamní platby (Google, Facebook, Sklik) automaticky označeny a skryty.
                   </p>
                 </div>
               )}
