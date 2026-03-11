@@ -45,8 +45,7 @@ const isAdsRelated = (description) => {
 };
 
 const getDefaultMonthData = (month) => ({
-  month,
-  revenueManual: null, // null = use auto, number = manual override
+  revenueManual: null,
   cogs: 0,
   marketing: {
     ads: month === '2026-01' ? 520000 : 0,
@@ -72,7 +71,77 @@ const saveFinanceState = (state) => {
   } catch (e) { /* ignore */ }
 };
 
-// Collapsible section component
+// ─── AI Category classification ───────────────────────────────────────────
+const EXPENSE_CATEGORIES = [
+  { id: 'mzdy', label: 'Mzdy', icon: '👤', color: 'blue' },
+  { id: 'jednorazove', label: 'Jednorázové náklady', icon: '⚡', color: 'amber' },
+  { id: 'najmy', label: 'Nájmy', icon: '🏠', color: 'purple' },
+  { id: 'dopravci', label: 'Dopravci', icon: '🚚', color: 'emerald' },
+  { id: 'ostatni', label: 'Ostatní', icon: '📦', color: 'slate' },
+];
+
+// Keyword-based classification rules
+const CATEGORY_RULES = [
+  // Dopravci
+  { pattern: /ppl|dpd|gls|zásilkovna|zasilkovna|česká pošta|ceska posta|packeta|balíkovna|balikovn|toptrans|geis|wedo|fedex|ups|dhl|messenger|kurýr|kuryr|doprav|shipping|foxdeli|spring/i, category: 'dopravci' },
+  // Mzdy
+  { pattern: /mzd[ay]|plat[y ]|výplat|odměn|pojišt[oě]|sociální|zdravotní|soci[aá]ln|zdrav|superhrubá|odvod|OSSZ|VZP|zaměstnan|zamestnan|personál|personal|DPP|DPČ/i, category: 'mzdy' },
+  // Nájmy
+  { pattern: /nájem|najem|nájm|najm|rent|pronájem|pronajem|kancelář|kancelar|sklad|warehouse|nebytov|prostor|budov|reality|realit/i, category: 'najmy' },
+  // Jednorázové - office supplies, equipment, one-off purchases from retail
+  { pattern: /alza|ikea|datart|mall\.cz|czc\.cz|electroworld|notino|rohlik|rohlík|tesco|albert|kaufland|lidl|penny|globus|makro|billa|dm drogerie|rossmann|kancelářsk|kancelarsk|tiskárn|tiskarn|notebook|počítač|pocitac|telefon|monitor|toner|cartridge|nábytek|nabytek|buffalo|steak|restaurant|restaurac|hotel|ubytov|letenk|air china|flughafen|booking|airbnb/i, category: 'jednorazove' },
+];
+
+const classifyExpense = (description) => {
+  const text = (description || '').toLowerCase();
+  for (const rule of CATEGORY_RULES) {
+    if (rule.pattern.test(text)) return rule.category;
+  }
+  return 'ostatni';
+};
+
+// ─── Vendor name normalization for grouping ──────────────────────────────
+const normalizeVendor = (description) => {
+  const text = (description || '').trim();
+  // Known vendor patterns
+  const vendorPatterns = [
+    { pattern: /alza/i, name: 'Alza.cz' },
+    { pattern: /ikea/i, name: 'IKEA' },
+    { pattern: /rohli[ck]|rohlík/i, name: 'Rohlík.cz' },
+    { pattern: /ppl/i, name: 'PPL' },
+    { pattern: /dpd/i, name: 'DPD' },
+    { pattern: /gls/i, name: 'GLS' },
+    { pattern: /zásilkov|zasilkov|packeta/i, name: 'Zásilkovna' },
+    { pattern: /česká pošta|ceska posta/i, name: 'Česká pošta' },
+    { pattern: /google/i, name: 'Google' },
+    { pattern: /facebook|meta platform/i, name: 'Meta / Facebook' },
+    { pattern: /seznam|sklik/i, name: 'Seznam / Sklik' },
+    { pattern: /datart/i, name: 'Datart' },
+    { pattern: /mall\.cz/i, name: 'Mall.cz' },
+    { pattern: /czc/i, name: 'CZC.cz' },
+    { pattern: /tesco/i, name: 'Tesco' },
+    { pattern: /albert/i, name: 'Albert' },
+    { pattern: /kaufland/i, name: 'Kaufland' },
+    { pattern: /lidl/i, name: 'Lidl' },
+    { pattern: /makro/i, name: 'Makro' },
+    { pattern: /buffalo steak/i, name: 'Buffalo Steakhouse' },
+    { pattern: /air china/i, name: 'Air China' },
+    { pattern: /flughafen/i, name: 'Flughafen Wien' },
+    { pattern: /foxdeli/i, name: 'Foxdeli' },
+    { pattern: /wedo/i, name: 'WeDo' },
+  ];
+
+  for (const v of vendorPatterns) {
+    if (v.pattern.test(text)) return v.name;
+  }
+
+  // Fallback: use first 2-3 words (up to comma or dash), capitalized
+  const short = text.split(/[,\-–]/)[0].trim();
+  // Limit to ~40 chars
+  return short.length > 40 ? short.substring(0, 37) + '...' : short;
+};
+
+// ─── Collapsible section component ───────────────────────────────────────
 const Section = ({ title, icon, children, defaultOpen = true, badge }) => {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -131,23 +200,199 @@ const HVCard = ({ label, value, color, sub }) => {
   );
 };
 
-export default function FinanceModule({ supabaseUrl, supabaseKey }) {
+// ─── Category Column Component ───────────────────────────────────────────
+const CategoryColumn = ({ category, items, onDrop, onRemove, onMoveToCategory, allCategories, expandedVendors, toggleVendor }) => {
+  const [dropActive, setDropActive] = useState(false);
+
+  const colorMap = {
+    blue: { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', dropBg: 'bg-blue-100', badge: 'bg-blue-100 text-blue-800', header: 'bg-blue-500' },
+    amber: { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', dropBg: 'bg-amber-100', badge: 'bg-amber-100 text-amber-800', header: 'bg-amber-500' },
+    purple: { bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700', dropBg: 'bg-purple-100', badge: 'bg-purple-100 text-purple-800', header: 'bg-purple-500' },
+    emerald: { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', dropBg: 'bg-emerald-100', badge: 'bg-emerald-100 text-emerald-800', header: 'bg-emerald-500' },
+    slate: { bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-700', dropBg: 'bg-slate-100', badge: 'bg-slate-100 text-slate-800', header: 'bg-slate-500' },
+  };
+  const colors = colorMap[category.color] || colorMap.slate;
+
+  const total = items.reduce((sum, i) => sum + i.amount, 0);
+
+  // Group items by normalized vendor
+  const vendorGroups = useMemo(() => {
+    const groups = {};
+    items.forEach(item => {
+      const vendor = normalizeVendor(item.description);
+      if (!groups[vendor]) groups[vendor] = { vendor, items: [], total: 0 };
+      groups[vendor].items.push(item);
+      groups[vendor].total += item.amount;
+    });
+    return Object.values(groups).sort((a, b) => b.total - a.total);
+  }, [items]);
+
+  const handleDragOver = useCallback((e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDropActive(true);
+  }, []);
+
+  const handleDragLeave = useCallback(() => setDropActive(false), []);
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    setDropActive(false);
+    const data = e.dataTransfer.getData('text/plain');
+    if (data) {
+      try {
+        const parsed = JSON.parse(data);
+        onDrop(parsed.itemId, parsed.fromCategory, category.id);
+      } catch {
+        // Legacy: just itemId string from bank list
+        onDrop(data, null, category.id);
+      }
+    }
+  }, [onDrop, category.id]);
+
+  return (
+    <div className={`rounded-xl border ${colors.border} overflow-hidden flex flex-col`}>
+      {/* Header */}
+      <div className={`${colors.header} text-white px-3 py-2 flex items-center justify-between`}>
+        <div className="flex items-center gap-2">
+          <span>{category.icon}</span>
+          <span className="text-sm font-semibold">{category.label}</span>
+        </div>
+        <span className="text-xs font-bold bg-white/20 px-2 py-0.5 rounded-full">
+          {formatCZK(total)}
+        </span>
+      </div>
+
+      {/* Drop zone */}
+      <div
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`flex-1 min-h-[80px] p-2 transition-all ${dropActive ? colors.dropBg : colors.bg}`}
+      >
+        {vendorGroups.length === 0 && !dropActive && (
+          <div className={`text-center py-4 text-xs ${colors.text} opacity-50`}>
+            Přetáhněte sem
+          </div>
+        )}
+        {dropActive && vendorGroups.length === 0 && (
+          <div className={`text-center py-4 text-xs font-medium ${colors.text}`}>
+            Pustit pro přiřazení
+          </div>
+        )}
+
+        <div className="space-y-1">
+          {vendorGroups.map(group => {
+            const isExpanded = expandedVendors.has(`${category.id}:${group.vendor}`);
+            const hasMultiple = group.items.length > 1;
+
+            return (
+              <div key={group.vendor}>
+                {/* Vendor summary row */}
+                <div
+                  className={`flex items-center gap-2 px-2 py-1.5 rounded-lg bg-white border ${colors.border} shadow-sm ${hasMultiple ? 'cursor-pointer hover:shadow-md' : ''} transition-all`}
+                  draggable={!hasMultiple}
+                  onDragStart={!hasMultiple ? (e) => {
+                    const item = group.items[0];
+                    e.dataTransfer.setData('text/plain', JSON.stringify({ itemId: item.id, fromCategory: category.id }));
+                    e.dataTransfer.effectAllowed = 'move';
+                  } : undefined}
+                  onClick={hasMultiple ? () => toggleVendor(`${category.id}:${group.vendor}`) : undefined}
+                >
+                  {hasMultiple && (
+                    <span className={`text-[10px] ${colors.text} transition-transform ${isExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-medium text-slate-700 truncate">{group.vendor}</div>
+                    {hasMultiple && (
+                      <div className="text-[10px] text-slate-400">{group.items.length} položek</div>
+                    )}
+                  </div>
+                  <span className={`text-xs font-bold ${colors.text} whitespace-nowrap`}>{formatCZK(group.total)}</span>
+                  {/* Move to other category dropdown */}
+                  <select
+                    className="text-[10px] bg-transparent border-none text-slate-400 cursor-pointer w-5 appearance-none hover:text-slate-600"
+                    title="Přesunout do jiné kategorie"
+                    value=""
+                    onClick={e => e.stopPropagation()}
+                    onChange={e => {
+                      if (e.target.value) {
+                        group.items.forEach(item => onMoveToCategory(item.id, category.id, e.target.value));
+                        e.target.value = '';
+                      }
+                    }}
+                  >
+                    <option value="">&#8942;</option>
+                    {allCategories.filter(c => c.id !== category.id).map(c => (
+                      <option key={c.id} value={c.id}>{c.icon} {c.label}</option>
+                    ))}
+                    <option value="__remove__">&#10005; Odebrat</option>
+                  </select>
+                </div>
+
+                {/* Expanded items */}
+                {isExpanded && hasMultiple && (
+                  <div className="ml-4 mt-1 space-y-0.5">
+                    {group.items.map(item => (
+                      <div
+                        key={item.id}
+                        draggable
+                        onDragStart={e => {
+                          e.dataTransfer.setData('text/plain', JSON.stringify({ itemId: item.id, fromCategory: category.id }));
+                          e.dataTransfer.effectAllowed = 'move';
+                        }}
+                        className={`flex items-center gap-2 px-2 py-1 rounded bg-white/80 border ${colors.border} text-[11px] cursor-grab active:cursor-grabbing`}
+                      >
+                        <span className="text-slate-300">&#9776;</span>
+                        <div className="flex-1 min-w-0 truncate text-slate-600">{item.description}</div>
+                        <span className={`font-medium ${colors.text} whitespace-nowrap`}>{formatCZK(item.amount)}</span>
+                        <button
+                          onClick={() => onRemove(item.id)}
+                          className="text-slate-300 hover:text-red-500 transition-colors"
+                          title="Odebrat"
+                        >&#10005;</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Single item: show description below vendor if different */}
+                {!hasMultiple && group.items[0].description !== group.vendor && (
+                  <div className="ml-2 text-[10px] text-slate-400 truncate px-2 -mt-0.5 mb-0.5">
+                    {group.items[0].date && `${group.items[0].date} • `}{group.items[0].description.substring(0, 60)}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Main FinanceModule
+// ═══════════════════════════════════════════════════════════════════════════
+
+export default function FinanceModule({ supabaseUrl, supabaseKey, supabase }) {
   const saved = useMemo(() => loadFinanceState(), []);
 
   const [selectedMonth, setSelectedMonth] = useState(saved?.selectedMonth || '2026-01');
   const [monthsData, setMonthsData] = useState(saved?.monthsData || {});
   const [bankItems, setBankItems] = useState(saved?.bankItems || []);
   const [assignedItems, setAssignedItems] = useState(saved?.assignedItems || {}); // { '2026-01': ['id1', ...] }
+  // Category assignments: { itemId: 'mzdy' | 'jednorazove' | 'najmy' | 'dopravci' | 'ostatni' }
+  const [itemCategories, setItemCategories] = useState(saved?.itemCategories || {});
   const [autoRevenue, setAutoRevenue] = useState(0);
   const [loadingRevenue, setLoadingRevenue] = useState(false);
-  const [draggedItem, setDraggedItem] = useState(null);
-  const [dropActive, setDropActive] = useState(false);
   const [showAddBank, setShowAddBank] = useState(false);
   const [showBulkAdd, setShowBulkAdd] = useState(false);
   const [showCsvImport, setShowCsvImport] = useState(false);
   const [bankFilter, setBankFilter] = useState('all');
   const [hideAds, setHideAds] = useState(true);
   const [csvSource, setCsvSource] = useState('2026-01');
+  const [expandedVendors, setExpandedVendors] = useState(new Set());
 
   // New bank item form
   const [newItem, setNewItem] = useState({ date: '', description: '', amount: '', source: '2026-01' });
@@ -158,8 +403,8 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
 
   // Save to localStorage on changes
   useEffect(() => {
-    saveFinanceState({ selectedMonth, monthsData, bankItems, assignedItems });
-  }, [selectedMonth, monthsData, bankItems, assignedItems]);
+    saveFinanceState({ selectedMonth, monthsData, bankItems, assignedItems, itemCategories });
+  }, [selectedMonth, monthsData, bankItems, assignedItems, itemCategories]);
 
   // Get/set current month data
   const currentData = monthsData[selectedMonth] || getDefaultMonthData(selectedMonth);
@@ -170,43 +415,62 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
     }));
   }, [selectedMonth]);
 
-  // Fetch revenue from Supabase for selected month
+  // Fetch revenue from Supabase for selected month (using Supabase JS client for reliability)
   useEffect(() => {
-    if (!supabaseUrl || !supabaseKey) return;
+    if (!supabase && !supabaseUrl) return;
     setLoadingRevenue(true);
     setAutoRevenue(0);
 
     const [year, month] = selectedMonth.split('-');
-    const dateFrom = `${year}-${month}-01`;
+    const dateFrom = `${year}-${month}-01T00:00:00`;
     const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
-    const dateTo = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
-
-    // Dynamic timezone offset (same logic as main App)
-    const tzOffset = -new Date().getTimezoneOffset();
-    const tzSign = tzOffset >= 0 ? '%2B' : '-';
-    const tzHours = String(Math.floor(Math.abs(tzOffset) / 60)).padStart(2, '0');
-    const tzMins = String(Math.abs(tzOffset) % 60).padStart(2, '0');
-    const tz = `${tzSign}${tzHours}:${tzMins}`;
+    const dateTo = `${year}-${month}-${String(lastDay).padStart(2, '0')}T23:59:59`;
 
     async function fetchRevenue() {
       let allOrders = [];
       let offset = 0;
       const limit = 1000;
 
-      while (true) {
-        const url = `${supabaseUrl}/rest/v1/orders?select=*&order_date=gte.${dateFrom}T00:00:00${tz}&order_date=lte.${dateTo}T23:59:59${tz}&order=order_date.desc&limit=${limit}&offset=${offset}`;
-        const response = await fetch(url, {
-          headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
-        });
-        if (!response.ok) {
-          console.error(`Finance fetch error: HTTP ${response.status} for ${dateFrom} - ${dateTo}`);
-          throw new Error(`HTTP ${response.status}`);
+      if (supabase) {
+        // Use Supabase JS client (same as main App uses)
+        while (true) {
+          const { data, error } = await supabase
+            .from('orders')
+            .select('*')
+            .gte('order_date', dateFrom)
+            .lte('order_date', dateTo)
+            .order('order_date', { ascending: false })
+            .range(offset, offset + limit - 1);
+
+          if (error) {
+            console.error(`Finance: Supabase error for ${selectedMonth}:`, error);
+            throw error;
+          }
+          if (!data || data.length === 0) break;
+          allOrders = allOrders.concat(data);
+          offset += limit;
+          if (data.length < limit) break;
         }
-        const data = await response.json();
-        if (!Array.isArray(data) || data.length === 0) break;
-        allOrders = allOrders.concat(data);
-        offset += limit;
-        if (data.length < limit) break;
+      } else {
+        // Fallback: raw fetch
+        const tzOffset = -new Date().getTimezoneOffset();
+        const tzSign = tzOffset >= 0 ? '%2B' : '-';
+        const tzHours = String(Math.floor(Math.abs(tzOffset) / 60)).padStart(2, '0');
+        const tzMins = String(Math.abs(tzOffset) % 60).padStart(2, '0');
+        const tz = `${tzSign}${tzHours}:${tzMins}`;
+
+        while (true) {
+          const url = `${supabaseUrl}/rest/v1/orders?select=*&order_date=gte.${dateFrom}${tz}&order_date=lte.${dateTo}${tz}&order=order_date.desc&limit=${limit}&offset=${offset}`;
+          const response = await fetch(url, {
+            headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
+          });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const data = await response.json();
+          if (!Array.isArray(data) || data.length === 0) break;
+          allOrders = allOrders.concat(data);
+          offset += limit;
+          if (data.length < limit) break;
+        }
       }
 
       // Deduplicate & filter cancelled
@@ -220,7 +484,7 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
         return s1 !== 'STORNO' && s2 !== 'STORNO';
       });
 
-      console.log(`Finance: ${selectedMonth} → ${clean.length} orders fetched`);
+      console.log(`Finance: ${selectedMonth} → ${clean.length} orders, raw: ${allOrders.length}`);
 
       let totalRevenue = 0;
       clean.forEach(o => { totalRevenue += getRevenueWithoutVAT(o); });
@@ -237,7 +501,7 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
         console.error(`Finance: fetch failed for ${selectedMonth}:`, err);
         setLoadingRevenue(false);
       });
-  }, [selectedMonth, supabaseUrl, supabaseKey]);
+  }, [selectedMonth, supabase, supabaseUrl, supabaseKey]);
 
   // Computed values
   const revenue = currentData.revenueManual !== null ? currentData.revenueManual : autoRevenue;
@@ -272,42 +536,187 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
   // Items NOT assigned to current month (available for drag)
   const availableItems = filteredBankItems.filter(bi => !monthAssigned.includes(bi.id));
 
-  // Drag & Drop handlers
-  const handleDragStart = useCallback((e, item) => {
-    setDraggedItem(item);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', item.id);
-  }, []);
+  // Group available items by vendor for the left panel
+  const availableVendorGroups = useMemo(() => {
+    const groups = {};
+    availableItems.forEach(item => {
+      const vendor = normalizeVendor(item.description);
+      if (!groups[vendor]) groups[vendor] = { vendor, items: [], total: 0 };
+      groups[vendor].items.push(item);
+      groups[vendor].total += item.amount;
+    });
+    return Object.values(groups).sort((a, b) => b.total - a.total);
+  }, [availableItems]);
 
-  const handleDragOver = useCallback((e) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    setDropActive(true);
-  }, []);
+  const [expandedAvailableVendors, setExpandedAvailableVendors] = useState(new Set());
 
-  const handleDragLeave = useCallback(() => {
-    setDropActive(false);
-  }, []);
+  // Items per category for the current month
+  const categoryItems = useMemo(() => {
+    const result = {};
+    EXPENSE_CATEGORIES.forEach(cat => { result[cat.id] = []; });
+    assignedBankItems.forEach(item => {
+      const cat = itemCategories[item.id] || 'ostatni';
+      if (result[cat]) result[cat].push(item);
+      else result.ostatni.push(item);
+    });
+    return result;
+  }, [assignedBankItems, itemCategories]);
 
-  const handleDrop = useCallback((e) => {
-    e.preventDefault();
-    setDropActive(false);
-    const itemId = e.dataTransfer.getData('text/plain');
-    if (itemId) {
+  // ─── Drag & Drop handlers ──────────────────────────────────────────────
+
+  // Assign item from bank list to a category column
+  const handleAssignToCategory = useCallback((itemId, fromCategory, toCategory) => {
+    if (toCategory === '__remove__') {
+      // Remove from assigned
+      setAssignedItems(prev => ({
+        ...prev,
+        [selectedMonth]: (prev[selectedMonth] || []).filter(id => id !== itemId)
+      }));
+      setItemCategories(prev => {
+        const next = { ...prev };
+        delete next[itemId];
+        return next;
+      });
+      return;
+    }
+
+    // If not yet assigned to this month, assign it
+    if (!monthAssigned.includes(itemId)) {
       setAssignedItems(prev => ({
         ...prev,
         [selectedMonth]: [...(prev[selectedMonth] || []), itemId]
       }));
     }
-    setDraggedItem(null);
+
+    // Set/move category
+    setItemCategories(prev => ({ ...prev, [itemId]: toCategory }));
+  }, [selectedMonth, monthAssigned]);
+
+  // Move item between categories
+  const handleMoveToCategory = useCallback((itemId, fromCategory, toCategory) => {
+    if (toCategory === '__remove__') {
+      setAssignedItems(prev => ({
+        ...prev,
+        [selectedMonth]: (prev[selectedMonth] || []).filter(id => id !== itemId)
+      }));
+      setItemCategories(prev => {
+        const next = { ...prev };
+        delete next[itemId];
+        return next;
+      });
+      return;
+    }
+    setItemCategories(prev => ({ ...prev, [itemId]: toCategory }));
   }, [selectedMonth]);
 
-  const handleUnassign = useCallback((itemId) => {
+  const handleRemoveFromCategory = useCallback((itemId) => {
     setAssignedItems(prev => ({
       ...prev,
       [selectedMonth]: (prev[selectedMonth] || []).filter(id => id !== itemId)
     }));
+    setItemCategories(prev => {
+      const next = { ...prev };
+      delete next[itemId];
+      return next;
+    });
   }, [selectedMonth]);
+
+  const toggleVendor = useCallback((key) => {
+    setExpandedVendors(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const toggleAvailableVendor = useCallback((vendor) => {
+    setExpandedAvailableVendors(prev => {
+      const next = new Set(prev);
+      if (next.has(vendor)) next.delete(vendor);
+      else next.add(vendor);
+      return next;
+    });
+  }, []);
+
+  // Drag from bank list: auto-classify on drop
+  const handleBankDragStart = useCallback((e, item) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', item.id);
+  }, []);
+
+  // Drag from bank list (group of items)
+  const handleBankGroupDragStart = useCallback((e, items) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', JSON.stringify({ groupItemIds: items.map(i => i.id) }));
+  }, []);
+
+  // Handle drop on category: auto-classify if from bank list
+  const handleCategoryDrop = useCallback((rawItemId, fromCategory, toCategory) => {
+    if (toCategory === '__remove__') {
+      handleMoveToCategory(rawItemId, fromCategory, '__remove__');
+      return;
+    }
+
+    // Check if it's a group drop
+    try {
+      const parsed = JSON.parse(rawItemId);
+      if (parsed.groupItemIds) {
+        // Group of items from bank list
+        parsed.groupItemIds.forEach(id => {
+          if (!monthAssigned.includes(id)) {
+            setAssignedItems(prev => ({
+              ...prev,
+              [selectedMonth]: [...(prev[selectedMonth] || []), id]
+            }));
+          }
+          setItemCategories(prev => ({ ...prev, [id]: toCategory }));
+        });
+        return;
+      }
+      if (parsed.itemId) {
+        // Single item from category column
+        handleAssignToCategory(parsed.itemId, parsed.fromCategory, toCategory);
+        return;
+      }
+    } catch {
+      // Not JSON - it's a plain itemId from bank list
+    }
+
+    // New item from bank list - auto-classify to the dropped category
+    if (!monthAssigned.includes(rawItemId)) {
+      const item = bankItems.find(bi => bi.id === rawItemId);
+      setAssignedItems(prev => ({
+        ...prev,
+        [selectedMonth]: [...(prev[selectedMonth] || []), rawItemId]
+      }));
+      setItemCategories(prev => ({ ...prev, [rawItemId]: toCategory }));
+    } else {
+      // Already assigned, just re-categorize
+      setItemCategories(prev => ({ ...prev, [rawItemId]: toCategory }));
+    }
+  }, [selectedMonth, monthAssigned, bankItems, handleAssignToCategory, handleMoveToCategory]);
+
+  // Auto-assign to correct category (AI button)
+  const autoAssignAll = useCallback(() => {
+    // Take all available items (not assigned), classify and assign them
+    const newAssignments = {};
+    const toAssign = [];
+
+    availableItems.forEach(item => {
+      const cat = classifyExpense(item.description);
+      newAssignments[item.id] = cat;
+      toAssign.push(item.id);
+    });
+
+    if (toAssign.length === 0) return;
+
+    setAssignedItems(prev => ({
+      ...prev,
+      [selectedMonth]: [...(prev[selectedMonth] || []), ...toAssign]
+    }));
+    setItemCategories(prev => ({ ...prev, ...newAssignments }));
+  }, [availableItems, selectedMonth]);
 
   // Add single bank item
   const addBankItem = () => {
@@ -332,7 +741,6 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      // Try to parse: "date ; description ; amount" or "description ; amount"
       const parts = trimmed.split(/[;\t]/).map(p => p.trim());
       let date = '', description = '', amount = 0;
 
@@ -344,7 +752,6 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
         description = parts[0];
         amount = Math.abs(parseFloat(parts[1].replace(/\s/g, '').replace(',', '.'))) || 0;
       } else {
-        // Try last "word" as amount
         const match = trimmed.match(/^(.+?)\s+([\d\s,.]+)\s*(?:Kč|CZK)?$/i);
         if (match) {
           description = match[1].trim();
@@ -375,7 +782,6 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
   // Delete bank item
   const deleteBankItem = (itemId) => {
     setBankItems(prev => prev.filter(bi => bi.id !== itemId));
-    // Also remove from all assignments
     setAssignedItems(prev => {
       const updated = {};
       for (const [month, ids] of Object.entries(prev)) {
@@ -383,9 +789,14 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
       }
       return updated;
     });
+    setItemCategories(prev => {
+      const next = { ...prev };
+      delete next[itemId];
+      return next;
+    });
   };
 
-  // Proper CSV line parser that handles quoted fields (e.g. "field;with;semicolons")
+  // Proper CSV line parser
   const parseCsvLine = (line, sep) => {
     const fields = [];
     let current = '';
@@ -395,7 +806,7 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
       if (ch === '"') {
         if (inQuotes && line[i + 1] === '"') {
           current += '"';
-          i++; // skip escaped quote
+          i++;
         } else {
           inQuotes = !inQuotes;
         }
@@ -410,14 +821,13 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
     return fields;
   };
 
-  // Parse Czech number format: "-98 387,08" → -98387.08
   const parseCzechNumber = (str) => {
     if (!str) return 0;
     const cleaned = str.replace(/[^\d,.\-]/g, '').replace(',', '.');
     return parseFloat(cleaned) || 0;
   };
 
-  // CSV import handler - supports Fio banka, ČSOB, KB, Raiffeisen, mBank etc.
+  // CSV import handler
   const handleCsvImport = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -425,25 +835,20 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
     const reader = new FileReader();
     reader.onload = (event) => {
       let text = event.target.result;
-
-      // Some banks add BOM or extra whitespace
       text = text.replace(/^\uFEFF/, '').trim();
 
       const lines = text.split(/\r?\n/);
       const newItems = [];
 
-      // Detect separator from first non-empty line
       let headerLineIdx = 0;
       for (let i = 0; i < Math.min(lines.length, 10); i++) {
         const line = lines[i].trim();
         if (!line) continue;
-        // Fio banka sometimes has info lines before header; header usually contains "Datum"
         const lower = line.toLowerCase();
         if (lower.includes('datum') || lower.includes('date') || lower.includes('částka') || lower.includes('objem')) {
           headerLineIdx = i;
           break;
         }
-        // If first line has many semicolons, it's likely the header
         if (i === 0 && (line.match(/;/g) || []).length >= 3) {
           headerLineIdx = 0;
           break;
@@ -457,8 +862,6 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
 
       const headers = parseCsvLine(headerLine, sep).map(h => h.toLowerCase().replace(/"/g, ''));
 
-      // Find columns by name patterns
-      // Fio banka: "Datum";"ID pohybu";"Datum2";"Objem";"Měna";"Protiúčet";"Název protiúčtu";"Kód banky";"Název banky";"KS";"VS";"SS";"Poznámka";"Zpráva pro příjemce";"Typ";"Provedl";"Upřesnění";"Komentář";"BIC";"ID pokynu"
       const dateCol = headers.findIndex(h => /^datum$|^date$/.test(h));
       const amountCol = headers.findIndex(h => /objem|částka|castka|suma|amount|hodnota|čás/.test(h));
       const currencyCol = headers.findIndex(h => /měna|mena|currency/.test(h));
@@ -484,8 +887,6 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
 
         const cols = parseCsvLine(line, sep);
 
-        // Skip summary/footer rows (e.g. "Suma výdajů", "Počáteční stav", "Koncový stav")
-        const firstCol = (cols[0] || '').toLowerCase();
         if (/suma |počáteční|koncový|celkem|zůstatek|balance/i.test(cols.join(' '))) continue;
 
         const date = dateCol >= 0 ? cols[dateCol] || '' : '';
@@ -493,8 +894,6 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
         const amount = parseCzechNumber(rawAmount);
         const currency = currencyCol >= 0 ? (cols[currencyCol] || 'CZK').toUpperCase() : 'CZK';
 
-        // Build best description from available columns
-        // Priority: zpráva pro příjemce > poznámka > název protiúčtu > popis
         let description = '';
         const zpravaVal = descCols.zprava >= 0 ? (cols[descCols.zprava] || '').trim() : '';
         const poznamkaVal = descCols.poznamka >= 0 ? (cols[descCols.poznamka] || '').trim() : '';
@@ -502,7 +901,6 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
         const popisVal = descCols.popis >= 0 ? (cols[descCols.popis] || '').trim() : '';
         const typVal = descCols.typ >= 0 ? (cols[descCols.typ] || '').trim() : '';
 
-        // Use the most descriptive field
         if (zpravaVal) {
           description = zpravaVal;
         } else if (poznamkaVal) {
@@ -512,14 +910,10 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
         } else if (popisVal) {
           description = popisVal;
         } else {
-          // Fallback: concatenate non-empty interesting fields
           description = [prijemceVal, poznamkaVal, typVal].filter(Boolean).join(' | ') || `Řádek ${i + 1}`;
         }
 
-        // Clean up description: remove "Nákup: " prefix for cleaner display
         description = description.replace(/^Nákup:\s*/i, '');
-
-        // Truncate very long descriptions
         if (description.length > 100) {
           description = description.substring(0, 97) + '...';
         }
@@ -540,7 +934,6 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
       }
 
       if (newItems.length > 0) {
-        // Only import expenses (negative amounts)
         const hasNegative = newItems.some(i => i.isExpense);
         const toImport = hasNegative ? newItems.filter(i => i.isExpense) : newItems;
         const cleaned = toImport.map(({ isExpense, currency, type, ...rest }) => rest);
@@ -558,9 +951,7 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
       }
     };
 
-    // Try UTF-8 first, fallback to Windows-1250 (common for Czech banks)
     reader.readAsText(file, 'UTF-8');
-    // Reset the input
     e.target.value = '';
   };
 
@@ -719,10 +1110,10 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
       {/* Section 3: Operating Costs → HV3 */}
       <Section title={`Provozní náklady – ${selectedLabel}`} icon="🏢" badge={`HV3: ${formatCZK(hv3)}`}>
         <div className="pt-4">
-          {/* Drag & Drop Area */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* LEFT: Available bank items */}
-            <div>
+          {/* Two column layout: bank items left, categories right */}
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+            {/* LEFT: Available bank items (2 cols) */}
+            <div className="lg:col-span-2">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-semibold text-slate-700">Bankovní výpisy</h3>
                 <div className="flex gap-1">
@@ -775,6 +1166,16 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
                 </label>
               </div>
 
+              {/* Auto-classify button */}
+              {availableItems.length > 0 && (
+                <button
+                  onClick={autoAssignAll}
+                  className="w-full mb-2 px-3 py-2 text-xs font-medium bg-gradient-to-r from-violet-500 to-blue-500 text-white rounded-lg hover:from-violet-600 hover:to-blue-600 transition-all shadow-sm"
+                >
+                  🤖 AI: Rozřadit vše automaticky ({availableItems.length} položek)
+                </button>
+              )}
+
               {/* Add single item form */}
               {showAddBank && (
                 <div className="bg-slate-50 rounded-lg p-3 mb-2 border border-slate-200">
@@ -825,7 +1226,7 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
               {showBulkAdd && (
                 <div className="bg-slate-50 rounded-lg p-3 mb-2 border border-slate-200">
                   <p className="text-xs text-slate-500 mb-2">
-                    Vložte řádky z výpisu. Formát: <code>popis ; částka</code> nebo <code>datum ; popis ; částka</code> (oddělovač: středník nebo tabulátor)
+                    Vložte řádky z výpisu. Formát: <code>popis ; částka</code> nebo <code>datum ; popis ; částka</code>
                   </p>
                   <textarea
                     value={bulkText}
@@ -880,50 +1281,82 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
                     />
                   </label>
                   <p className="text-[10px] text-slate-400 mt-2">
-                    Fio banka, ČSOB, KB, Raiffeisen... Importují se pouze výdaje (záporné částky). Reklamní platby (Google, Facebook, Sklik) automaticky označeny a skryty.
+                    Fio banka, ČSOB, KB, Raiffeisen... Importují se pouze výdaje (záporné částky). Reklamní platby automaticky označeny a skryty.
                   </p>
                 </div>
               )}
 
-              {/* Bank items list */}
-              <div className="space-y-1 max-h-[400px] overflow-y-auto pr-1">
-                {availableItems.length === 0 && (
+              {/* Bank items list - grouped by vendor */}
+              <div className="space-y-1 max-h-[500px] overflow-y-auto pr-1">
+                {availableVendorGroups.length === 0 && (
                   <div className="text-center py-8 text-slate-400 text-sm">
                     {bankItems.length === 0
                       ? 'Zatím žádné položky. Přidejte platby z bankovních výpisů.'
                       : 'Všechny položky jsou přiřazeny nebo skryty.'}
                   </div>
                 )}
-                {availableItems.map(item => {
-                  const assignedElsewhere = allAssigned.has(item.id) && !monthAssigned.includes(item.id);
+                {availableVendorGroups.map(group => {
+                  const hasMultiple = group.items.length > 1;
+                  const isExpanded = expandedAvailableVendors.has(group.vendor);
+
                   return (
-                    <div
-                      key={item.id}
-                      draggable
-                      onDragStart={e => handleDragStart(e, item)}
-                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-grab active:cursor-grabbing transition-all hover:shadow-sm ${
-                        assignedElsewhere
-                          ? 'bg-amber-50 border-amber-200 opacity-60'
-                          : 'bg-white border-slate-200 hover:border-blue-300'
-                      }`}
-                    >
-                      <span className="text-slate-300 text-xs">&#9776;</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs font-medium text-slate-700 truncate">{item.description}</div>
-                        <div className="text-[10px] text-slate-400">
-                          {item.date && `${item.date} • `}
-                          {BANK_SOURCES.find(s => s.value === item.source)?.label || item.source}
-                          {assignedElsewhere && ' • Přiřazeno jinde'}
-                        </div>
-                      </div>
-                      <span className="text-xs font-bold text-slate-700 whitespace-nowrap">{formatCZK(item.amount)}</span>
-                      <button
-                        onClick={() => deleteBankItem(item.id)}
-                        className="text-slate-300 hover:text-red-500 text-xs transition-colors"
-                        title="Smazat"
+                    <div key={group.vendor}>
+                      <div
+                        draggable
+                        onDragStart={e => handleBankGroupDragStart(e, group.items)}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-grab active:cursor-grabbing transition-all hover:shadow-sm bg-white border-slate-200 hover:border-blue-300 ${hasMultiple ? 'cursor-pointer' : ''}`}
+                        onClick={hasMultiple ? () => toggleAvailableVendor(group.vendor) : undefined}
                       >
-                        &#10005;
-                      </button>
+                        {hasMultiple && (
+                          <span className={`text-[10px] text-slate-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
+                        )}
+                        <span className="text-slate-300 text-xs">&#9776;</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs font-medium text-slate-700 truncate">{group.vendor}</div>
+                          <div className="text-[10px] text-slate-400">
+                            {hasMultiple ? `${group.items.length} položek` : (
+                              <>
+                                {group.items[0].date && `${group.items[0].date} • `}
+                                {BANK_SOURCES.find(s => s.value === group.items[0].source)?.label || group.items[0].source}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <span className="text-xs font-bold text-slate-700 whitespace-nowrap">{formatCZK(group.total)}</span>
+                        {!hasMultiple && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); deleteBankItem(group.items[0].id); }}
+                            className="text-slate-300 hover:text-red-500 text-xs transition-colors"
+                            title="Smazat"
+                          >
+                            &#10005;
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Expanded individual items */}
+                      {isExpanded && hasMultiple && (
+                        <div className="ml-6 mt-1 space-y-0.5 mb-1">
+                          {group.items.map(item => (
+                            <div
+                              key={item.id}
+                              draggable
+                              onDragStart={e => handleBankDragStart(e, item)}
+                              className="flex items-center gap-2 px-2 py-1 rounded bg-slate-50 border border-slate-100 text-[11px] cursor-grab active:cursor-grabbing"
+                            >
+                              <span className="text-slate-300">&#9776;</span>
+                              <div className="flex-1 min-w-0 truncate text-slate-600">
+                                {item.description}
+                              </div>
+                              <span className="font-medium text-slate-600 whitespace-nowrap">{formatCZK(item.amount)}</span>
+                              <button
+                                onClick={() => deleteBankItem(item.id)}
+                                className="text-slate-300 hover:text-red-500 transition-colors"
+                              >&#10005;</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -935,67 +1368,33 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
               )}
             </div>
 
-            {/* RIGHT: Assigned costs (drop zone) */}
-            <div>
-              <h3 className="text-sm font-semibold text-slate-700 mb-2">
-                Náklady přiřazené k {selectedLabel}
-              </h3>
-
-              {/* Drop zone */}
-              <div
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                className={`min-h-[120px] rounded-xl border-2 border-dashed p-3 transition-all mb-3 ${
-                  dropActive
-                    ? 'border-blue-400 bg-blue-50 shadow-inner'
-                    : 'border-slate-200 bg-slate-50'
-                }`}
-              >
-                {assignedBankItems.length === 0 && !dropActive && (
-                  <div className="text-center py-6 text-slate-400 text-sm">
-                    Přetáhněte položky sem &#8592;
-                  </div>
-                )}
-                {dropActive && assignedBankItems.length === 0 && (
-                  <div className="text-center py-6 text-blue-500 text-sm font-medium">
-                    Pusťte zde pro přiřazení
-                  </div>
-                )}
-                <div className="space-y-1">
-                  {assignedBankItems.map(item => (
-                    <div
-                      key={item.id}
-                      className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white border border-emerald-200 shadow-sm"
-                    >
-                      <span className="text-emerald-500 text-xs">&#10003;</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs font-medium text-slate-700 truncate">{item.description}</div>
-                        <div className="text-[10px] text-slate-400">
-                          {item.date && `${item.date} • `}
-                          {BANK_SOURCES.find(s => s.value === item.source)?.label || item.source}
-                        </div>
-                      </div>
-                      <span className="text-xs font-bold text-emerald-700 whitespace-nowrap">{formatCZK(item.amount)}</span>
-                      <button
-                        onClick={() => handleUnassign(item.id)}
-                        className="text-slate-300 hover:text-red-500 text-xs transition-colors"
-                        title="Odebrat"
-                      >
-                        &#8592;
-                      </button>
-                    </div>
-                  ))}
-                </div>
+            {/* RIGHT: Category columns (3 cols) */}
+            <div className="lg:col-span-3">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-slate-700">
+                  Náklady přiřazené k {selectedLabel}
+                </h3>
+                <span className="text-xs text-slate-500">
+                  Celkem: <strong className="text-slate-700">{formatCZK(assignedCostsTotal)}</strong>
+                </span>
               </div>
 
-              {/* Assigned total */}
-              {assignedBankItems.length > 0 && (
-                <div className="flex justify-between items-center px-3 py-2 bg-emerald-50 rounded-lg border border-emerald-200 mb-3">
-                  <span className="text-xs text-emerald-700 font-medium">Celkem z výpisů:</span>
-                  <span className="text-sm font-bold text-emerald-800">{formatCZK(assignedCostsTotal)}</span>
-                </div>
-              )}
+              {/* Category columns grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-3">
+                {EXPENSE_CATEGORIES.map(cat => (
+                  <CategoryColumn
+                    key={cat.id}
+                    category={cat}
+                    items={categoryItems[cat.id] || []}
+                    onDrop={handleCategoryDrop}
+                    onRemove={handleRemoveFromCategory}
+                    onMoveToCategory={handleMoveToCategory}
+                    allCategories={EXPENSE_CATEGORIES}
+                    expandedVendors={expandedVendors}
+                    toggleVendor={toggleVendor}
+                  />
+                ))}
+              </div>
 
               {/* Cash expenses */}
               <div className="mt-4">
@@ -1092,12 +1491,25 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
                 <td className="py-2 px-2 font-semibold text-purple-800">= HV2 (Po marketingu)</td>
                 <td className={`py-2 px-2 text-right font-bold ${hv2 >= 0 ? 'text-purple-800' : 'text-red-600'}`}>{formatCZK(hv2)}</td>
               </tr>
-              {assignedBankItems.map(item => (
-                <tr key={item.id} className="border-b border-slate-100">
-                  <td className="py-2 text-slate-600 pl-4">− {item.description}</td>
-                  <td className="py-2 text-right text-red-600">− {formatCZK(item.amount)}</td>
-                </tr>
-              ))}
+              {/* Show by category */}
+              {EXPENSE_CATEGORIES.filter(cat => (categoryItems[cat.id] || []).length > 0).map(cat => {
+                const items = categoryItems[cat.id] || [];
+                const catTotal = items.reduce((s, i) => s + i.amount, 0);
+                return (
+                  <React.Fragment key={cat.id}>
+                    <tr className="border-b border-slate-100 bg-slate-50">
+                      <td className="py-1.5 text-slate-500 pl-4 text-xs font-semibold uppercase">{cat.icon} {cat.label}</td>
+                      <td className="py-1.5 text-right text-red-600 text-xs font-semibold">− {formatCZK(catTotal)}</td>
+                    </tr>
+                    {items.map(item => (
+                      <tr key={item.id} className="border-b border-slate-100">
+                        <td className="py-2 text-slate-600 pl-8 text-xs">− {item.description}</td>
+                        <td className="py-2 text-right text-red-600 text-xs">− {formatCZK(item.amount)}</td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                );
+              })}
               {(currentData.cashExpenses || []).map(ce => (
                 <tr key={ce.id} className="border-b border-slate-100">
                   <td className="py-2 text-slate-600 pl-4">− {ce.description} (hotovost)</td>

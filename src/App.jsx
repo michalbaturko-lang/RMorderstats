@@ -1790,7 +1790,7 @@ export default function App() {
           )}
 
           {tab === 'finance' && user?.email === 'michal.baturko@regalmaster.cz' && (
-            <FinanceModule supabaseUrl={SUPABASE_URL} supabaseKey={SUPABASE_KEY} />
+            <FinanceModule supabaseUrl={SUPABASE_URL} supabaseKey={SUPABASE_KEY} supabase={supabase} />
           )}
 
           {tab === 'b2b' && (
