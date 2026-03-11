@@ -3,24 +3,24 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 const genId = () => Math.random().toString(36).substr(2, 9);
 
 const MONTHS = [
-  { value: '2025-01', label: 'Leden 2025' },
-  { value: '2025-02', label: 'Únor 2025' },
-  { value: '2025-03', label: 'Březen 2025' },
-  { value: '2025-04', label: 'Duben 2025' },
-  { value: '2025-05', label: 'Květen 2025' },
-  { value: '2025-06', label: 'Červen 2025' },
-  { value: '2025-07', label: 'Červenec 2025' },
-  { value: '2025-08', label: 'Srpen 2025' },
-  { value: '2025-09', label: 'Září 2025' },
-  { value: '2025-10', label: 'Říjen 2025' },
-  { value: '2025-11', label: 'Listopad 2025' },
-  { value: '2025-12', label: 'Prosinec 2025' },
+  { value: '2026-01', label: 'Leden 2026' },
+  { value: '2026-02', label: 'Únor 2026' },
+  { value: '2026-03', label: 'Březen 2026' },
+  { value: '2026-04', label: 'Duben 2026' },
+  { value: '2026-05', label: 'Květen 2026' },
+  { value: '2026-06', label: 'Červen 2026' },
+  { value: '2026-07', label: 'Červenec 2026' },
+  { value: '2026-08', label: 'Srpen 2026' },
+  { value: '2026-09', label: 'Září 2026' },
+  { value: '2026-10', label: 'Říjen 2026' },
+  { value: '2026-11', label: 'Listopad 2026' },
+  { value: '2026-12', label: 'Prosinec 2026' },
 ];
 
 const BANK_SOURCES = [
-  { value: '2025-01', label: 'Leden 2025' },
-  { value: '2025-02', label: 'Únor 2025' },
-  { value: '2025-03', label: 'Březen 2025' },
+  { value: '2026-01', label: 'Leden 2026' },
+  { value: '2026-02', label: 'Únor 2026' },
+  { value: '2026-03', label: 'Březen 2026' },
 ];
 
 const formatNum = (num) => Math.round(num).toLocaleString('cs-CZ');
@@ -49,7 +49,7 @@ const getDefaultMonthData = (month) => ({
   revenueManual: null, // null = use auto, number = manual override
   cogs: 0,
   marketing: {
-    ads: month === '2025-01' ? 520000 : 0,
+    ads: month === '2026-01' ? 520000 : 0,
     sklik: 0,
     facebook: 0,
   },
@@ -134,10 +134,10 @@ const HVCard = ({ label, value, color, sub }) => {
 export default function FinanceModule({ supabaseUrl, supabaseKey }) {
   const saved = useMemo(() => loadFinanceState(), []);
 
-  const [selectedMonth, setSelectedMonth] = useState(saved?.selectedMonth || '2025-01');
+  const [selectedMonth, setSelectedMonth] = useState(saved?.selectedMonth || '2026-01');
   const [monthsData, setMonthsData] = useState(saved?.monthsData || {});
   const [bankItems, setBankItems] = useState(saved?.bankItems || []);
-  const [assignedItems, setAssignedItems] = useState(saved?.assignedItems || {}); // { '2025-01': ['id1', ...] }
+  const [assignedItems, setAssignedItems] = useState(saved?.assignedItems || {}); // { '2026-01': ['id1', ...] }
   const [autoRevenue, setAutoRevenue] = useState(0);
   const [loadingRevenue, setLoadingRevenue] = useState(false);
   const [draggedItem, setDraggedItem] = useState(null);
@@ -147,10 +147,10 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
   const [showCsvImport, setShowCsvImport] = useState(false);
   const [bankFilter, setBankFilter] = useState('all');
   const [hideAds, setHideAds] = useState(true);
-  const [csvSource, setCsvSource] = useState('2025-01');
+  const [csvSource, setCsvSource] = useState('2026-01');
 
   // New bank item form
-  const [newItem, setNewItem] = useState({ date: '', description: '', amount: '', source: '2025-01' });
+  const [newItem, setNewItem] = useState({ date: '', description: '', amount: '', source: '2026-01' });
   const [bulkText, setBulkText] = useState('');
 
   // New cash expense form
@@ -342,7 +342,7 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
           date,
           description,
           amount,
-          source: bankFilter !== 'all' ? bankFilter : '2025-01',
+          source: bankFilter !== 'all' ? bankFilter : '2026-01',
           adsRelated: isAdsRelated(description),
         });
       }
@@ -574,7 +574,7 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
               label="Google Ads"
               value={currentData.marketing?.ads}
               onChange={val => updateCurrentData({ marketing: { ...currentData.marketing, ads: val } })}
-              hint={selectedMonth === '2025-01' ? 'Leden: 520 000 Kč' : ''}
+              hint={selectedMonth === '2026-01' ? 'Leden: 520 000 Kč' : ''}
             />
             <CurrencyInput
               label="Sklik (Seznam)"
@@ -723,7 +723,7 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
                   />
                   <div className="flex justify-between items-center mt-2">
                     <select
-                      value={bankFilter !== 'all' ? bankFilter : '2025-01'}
+                      value={bankFilter !== 'all' ? bankFilter : '2026-01'}
                       onChange={e => setBankFilter(e.target.value)}
                       className="px-2 py-1 border border-slate-200 rounded-lg text-xs"
                     >
