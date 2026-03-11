@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import FinanceModule from './FinanceModule';
 
 const SUPABASE_URL = 'https://oonnawrfsbsbuijmfcqj.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9vbm5hd3Jmc2JzYnVpam1mY3FqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzMjA4ODcsImV4cCI6MjA4NTg5Njg4N30.d1jk1BYOc6eEx-KJzGpW3ekfDs4jxW10VgKmLef8f1Y';
@@ -762,9 +763,10 @@ export default function App() {
         {/* Tabs */}
         <div className="flex gap-1 bg-white p-1 rounded-xl shadow-sm border mb-4">
           {[
-            { id: 'heatmap', l: '🗓️ Časová analýza' }, 
-            { id: 'geo', l: '📍 Geografie' }, 
-            { id: 'b2b', l: '🏢 B2B / B2C' }
+            { id: 'heatmap', l: '🗓️ Časová analýza' },
+            { id: 'geo', l: '📍 Geografie' },
+            { id: 'b2b', l: '🏢 B2B / B2C' },
+            ...(user?.email === 'michal.baturko@regalmaster.cz' ? [{ id: 'finance', l: '💰 Finance' }] : [])
           ].map(t => (
             <button 
               key={t.id} 
@@ -890,6 +892,10 @@ export default function App() {
                 </div>
               </div>
             </>
+          )}
+
+          {tab === 'finance' && user?.email === 'michal.baturko@regalmaster.cz' && (
+            <FinanceModule supabaseUrl={SUPABASE_URL} supabaseKey={SUPABASE_KEY} />
           )}
 
           {tab === 'b2b' && (
