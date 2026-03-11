@@ -101,6 +101,19 @@ const getRevenueWithoutVAT = (order) => {
   return total * (CURRENCY_RATES[currency] || 1);
 };
 
+// Výpočet marže (prodejní cena bez DPH − nákupní cena)
+const getMargin = (order) => {
+  const products = order.raw_data?.products || [];
+  let margin = 0;
+  products.forEach(p => {
+    const sellPrice = parseFloat(p.price_without_vat || 0);
+    const buyPrice = parseFloat(p.buy_price || 0) * parseFloat(p.quantity || 1);
+    margin += sellPrice - buyPrice;
+  });
+  const currency = order.currency || 'CZK';
+  return margin * (CURRENCY_RATES[currency] || 1);
+};
+
 // Deduplikace objednávek (ochrana proti duplicitním záznamům ze syncu)
 const deduplicateOrders = (orders) => {
   const seen = new Set();
@@ -673,19 +686,22 @@ export default function App() {
   }, [filtered]);
 
   const kpis = useMemo(() => {
-    let cnt = 0, rev = 0, b2b = 0, big = 0;
-    filtered.forEach(o => { 
-      cnt++; 
-      rev += getRevenueWithoutVAT(o); 
-      if (isB2B(o)) b2b++; 
-      if (isBigCity(o.raw_data?.customer?.city_invoice, o.market)) big++; 
+    let cnt = 0, rev = 0, mar = 0, b2b = 0, big = 0;
+    filtered.forEach(o => {
+      cnt++;
+      rev += getRevenueWithoutVAT(o);
+      mar += getMargin(o);
+      if (isB2B(o)) b2b++;
+      if (isBigCity(o.raw_data?.customer?.city_invoice, o.market)) big++;
     });
-    return { 
-      orders: cnt, 
-      revenue: rev, 
-      aov: cnt ? rev / cnt : 0, 
-      b2bPct: cnt ? b2b / cnt * 100 : 0, 
-      bigPct: cnt ? big / cnt * 100 : 0 
+    return {
+      orders: cnt,
+      revenue: rev,
+      margin: mar,
+      marginPct: rev ? mar / rev * 100 : 0,
+      aov: cnt ? rev / cnt : 0,
+      b2bPct: cnt ? b2b / cnt * 100 : 0,
+      bigPct: cnt ? big / cnt * 100 : 0
     };
   }, [filtered]);
 
@@ -1224,9 +1240,10 @@ export default function App() {
         </div>
 
         {/* KPIs */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
           <KPICard title="Objednávky" value={formatNumber(kpis.orders)} icon="🛒" />
           <KPICard title="Obrat (bez DPH)" value={formatCurrency(kpis.revenue)} icon="💰" />
+          <KPICard title="Marže" value={formatCurrency(kpis.margin)} icon="📊" sub={`${kpis.marginPct.toFixed(1)} % z obratu`} />
           <KPICard title="Ø Objednávka" value={formatCurrency(kpis.aov)} icon="📦" />
           <KPICard title="B2B podíl" value={`${kpis.b2bPct.toFixed(0)}%`} icon="🏢" sub={`🏙️ Velká města: ${kpis.bigPct.toFixed(0)}%`} />
         </div>
