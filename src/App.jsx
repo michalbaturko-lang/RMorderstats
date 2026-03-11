@@ -527,6 +527,8 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [orders, setOrders] = useState([]);
+  const [financeOrders, setFinanceOrders] = useState({});  // { '2026-01': [...orders] }
+  const [financeMonth, setFinanceMonth] = useState('2026-01');
   const [country, setCountry] = useState('all');
   const [metric, setMetric] = useState('orders');
   const [tab, setTab] = useState('heatmap');
@@ -657,6 +659,47 @@ export default function App() {
       })
       .catch(e => { setError(e.message); setLoading(false); });
   }, [dateFrom, dateTo]);
+
+  // Fetch orders for finance module (per month)
+  useEffect(() => {
+    if (financeOrders[financeMonth]) return; // already fetched
+    const [year, month] = financeMonth.split('-');
+    const mDateFrom = `${year}-${month}-01`;
+    const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
+    const mDateTo = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
+
+    const tzOffset = -new Date().getTimezoneOffset();
+    const tzSign = tzOffset >= 0 ? '%2B' : '-';
+    const tzHours = String(Math.floor(Math.abs(tzOffset) / 60)).padStart(2, '0');
+    const tzMins = String(Math.abs(tzOffset) % 60).padStart(2, '0');
+    const tz = `${tzSign}${tzHours}:${tzMins}`;
+
+    async function fetchFinanceOrders() {
+      let all = [];
+      let off = 0;
+      const lim = 1000;
+      while (true) {
+        const response = await fetch(
+          `${SUPABASE_URL}/rest/v1/orders?select=*&order_date=gte.${mDateFrom}T00:00:00${tz}&order_date=lte.${mDateTo}T23:59:59${tz}&order=order_date.desc&limit=${lim}&offset=${off}`,
+          { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
+        );
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        if (!Array.isArray(data) || data.length === 0) break;
+        all = all.concat(data);
+        off += lim;
+        if (data.length < lim) break;
+      }
+      return deduplicateOrders(filterCancelled(all));
+    }
+
+    fetchFinanceOrders()
+      .then(data => {
+        console.log(`Finance orders ${financeMonth}: ${data.length}`);
+        setFinanceOrders(prev => ({ ...prev, [financeMonth]: data }));
+      })
+      .catch(err => console.error(`Finance fetch error:`, err));
+  }, [financeMonth, financeOrders]);
 
   const filtered = useMemo(() => country === 'all' ? orders : orders.filter(o => o.market === country), [orders, country]);
 
@@ -1790,7 +1833,13 @@ export default function App() {
           )}
 
           {tab === 'finance' && user?.email === 'michal.baturko@regalmaster.cz' && (
-            <FinanceModule supabaseUrl={SUPABASE_URL} supabaseKey={SUPABASE_KEY} supabase={supabase} />
+            <FinanceModule
+              supabaseUrl={SUPABASE_URL}
+              supabaseKey={SUPABASE_KEY}
+              supabase={supabase}
+              appOrders={financeOrders}
+              onMonthChange={setFinanceMonth}
+            />
           )}
 
           {tab === 'b2b' && (

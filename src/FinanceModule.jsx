@@ -375,7 +375,7 @@ const CategoryColumn = ({ category, items, onDrop, onRemove, onMoveToCategory, a
 // Main FinanceModule
 // ═══════════════════════════════════════════════════════════════════════════
 
-export default function FinanceModule({ supabaseUrl, supabaseKey, supabase }) {
+export default function FinanceModule({ supabaseUrl, supabaseKey, supabase, appOrders, onMonthChange }) {
   const saved = useMemo(() => loadFinanceState(), []);
 
   const [selectedMonth, setSelectedMonth] = useState(saved?.selectedMonth || '2026-01');
@@ -415,93 +415,26 @@ export default function FinanceModule({ supabaseUrl, supabaseKey, supabase }) {
     }));
   }, [selectedMonth]);
 
-  // Fetch revenue from Supabase for selected month (using Supabase JS client for reliability)
+  // Notify parent App about month change so it fetches orders
   useEffect(() => {
-    if (!supabase && !supabaseUrl) return;
-    setLoadingRevenue(true);
-    setAutoRevenue(0);
+    if (onMonthChange) onMonthChange(selectedMonth);
+  }, [selectedMonth, onMonthChange]);
 
-    const [year, month] = selectedMonth.split('-');
-    const dateFrom = `${year}-${month}-01T00:00:00`;
-    const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
-    const dateTo = `${year}-${month}-${String(lastDay).padStart(2, '0')}T23:59:59`;
-
-    async function fetchRevenue() {
-      let allOrders = [];
-      let offset = 0;
-      const limit = 1000;
-
-      if (supabase) {
-        // Use Supabase JS client (same as main App uses)
-        while (true) {
-          const { data, error } = await supabase
-            .from('orders')
-            .select('*')
-            .gte('order_date', dateFrom)
-            .lte('order_date', dateTo)
-            .order('order_date', { ascending: false })
-            .range(offset, offset + limit - 1);
-
-          if (error) {
-            console.error(`Finance: Supabase error for ${selectedMonth}:`, error);
-            throw error;
-          }
-          if (!data || data.length === 0) break;
-          allOrders = allOrders.concat(data);
-          offset += limit;
-          if (data.length < limit) break;
-        }
-      } else {
-        // Fallback: raw fetch
-        const tzOffset = -new Date().getTimezoneOffset();
-        const tzSign = tzOffset >= 0 ? '%2B' : '-';
-        const tzHours = String(Math.floor(Math.abs(tzOffset) / 60)).padStart(2, '0');
-        const tzMins = String(Math.abs(tzOffset) % 60).padStart(2, '0');
-        const tz = `${tzSign}${tzHours}:${tzMins}`;
-
-        while (true) {
-          const url = `${supabaseUrl}/rest/v1/orders?select=*&order_date=gte.${dateFrom}${tz}&order_date=lte.${dateTo}${tz}&order=order_date.desc&limit=${limit}&offset=${offset}`;
-          const response = await fetch(url, {
-            headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
-          });
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const data = await response.json();
-          if (!Array.isArray(data) || data.length === 0) break;
-          allOrders = allOrders.concat(data);
-          offset += limit;
-          if (data.length < limit) break;
-        }
-      }
-
-      // Deduplicate & filter cancelled
-      const seen = new Set();
-      const clean = allOrders.filter(o => {
-        const key = o.raw_data?.order_number || o.id;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        const s1 = (o.status || '').toUpperCase();
-        const s2 = (o.raw_data?.status || '').toUpperCase();
-        return s1 !== 'STORNO' && s2 !== 'STORNO';
-      });
-
-      console.log(`Finance: ${selectedMonth} → ${clean.length} orders, raw: ${allOrders.length}`);
-
-      let totalRevenue = 0;
-      clean.forEach(o => { totalRevenue += getRevenueWithoutVAT(o); });
-      return totalRevenue;
+  // Calculate revenue from orders passed by parent App
+  useEffect(() => {
+    const monthOrders = appOrders?.[selectedMonth];
+    if (!monthOrders) {
+      setLoadingRevenue(true);
+      setAutoRevenue(0);
+      return;
     }
 
-    fetchRevenue()
-      .then(rev => {
-        console.log(`Finance: ${selectedMonth} revenue = ${rev}`);
-        setAutoRevenue(rev);
-        setLoadingRevenue(false);
-      })
-      .catch(err => {
-        console.error(`Finance: fetch failed for ${selectedMonth}:`, err);
-        setLoadingRevenue(false);
-      });
-  }, [selectedMonth, supabase, supabaseUrl, supabaseKey]);
+    let totalRevenue = 0;
+    monthOrders.forEach(o => { totalRevenue += getRevenueWithoutVAT(o); });
+    console.log(`Finance: ${selectedMonth} → ${monthOrders.length} orders, revenue = ${totalRevenue}`);
+    setAutoRevenue(totalRevenue);
+    setLoadingRevenue(false);
+  }, [selectedMonth, appOrders]);
 
   // Computed values
   const revenue = currentData.revenueManual !== null ? currentData.revenueManual : autoRevenue;
