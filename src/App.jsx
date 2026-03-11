@@ -101,14 +101,17 @@ const getRevenueWithoutVAT = (order) => {
   return total * (CURRENCY_RATES[currency] || 1);
 };
 
-// Výpočet marže (prodejní cena bez DPH − nákupní cena)
+// Výpočet marže (prodejní cena bez DPH − nákupní cena bez DPH)
+// buy_price z Upgates je S DPH, proto ho dělíme sazbou DPH
 const getMargin = (order) => {
   const products = order.raw_data?.products || [];
   let margin = 0;
   products.forEach(p => {
     const sellPrice = parseFloat(p.price_without_vat || 0);
-    const buyPrice = parseFloat(p.buy_price || 0) * parseFloat(p.quantity || 1);
-    margin += sellPrice - buyPrice;
+    const vatRate = parseFloat(p.vat_rate || 21);
+    const buyPriceExVat = parseFloat(p.buy_price || 0) / (1 + vatRate / 100);
+    const buyTotal = buyPriceExVat * parseFloat(p.quantity || 1);
+    margin += sellPrice - buyTotal;
   });
   const currency = order.currency || 'CZK';
   return margin * (CURRENCY_RATES[currency] || 1);
