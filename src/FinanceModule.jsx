@@ -174,13 +174,19 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
   useEffect(() => {
     if (!supabaseUrl || !supabaseKey) return;
     setLoadingRevenue(true);
+    setAutoRevenue(0);
 
     const [year, month] = selectedMonth.split('-');
     const dateFrom = `${year}-${month}-01`;
     const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
     const dateTo = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
 
-    const tz = '%2B01:00';
+    // Dynamic timezone offset (same logic as main App)
+    const tzOffset = -new Date().getTimezoneOffset();
+    const tzSign = tzOffset >= 0 ? '%2B' : '-';
+    const tzHours = String(Math.floor(Math.abs(tzOffset) / 60)).padStart(2, '0');
+    const tzMins = String(Math.abs(tzOffset) % 60).padStart(2, '0');
+    const tz = `${tzSign}${tzHours}:${tzMins}`;
 
     async function fetchRevenue() {
       let allOrders = [];
@@ -188,11 +194,14 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
       const limit = 1000;
 
       while (true) {
-        const response = await fetch(
-          `${supabaseUrl}/rest/v1/orders?select=*&order_date=gte.${dateFrom}T00:00:00${tz}&order_date=lte.${dateTo}T23:59:59${tz}&order=order_date.desc&limit=${limit}&offset=${offset}`,
-          { headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` } }
-        );
-        if (!response.ok) break;
+        const url = `${supabaseUrl}/rest/v1/orders?select=*&order_date=gte.${dateFrom}T00:00:00${tz}&order_date=lte.${dateTo}T23:59:59${tz}&order=order_date.desc&limit=${limit}&offset=${offset}`;
+        const response = await fetch(url, {
+          headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
+        });
+        if (!response.ok) {
+          console.error(`Finance fetch error: HTTP ${response.status} for ${dateFrom} - ${dateTo}`);
+          throw new Error(`HTTP ${response.status}`);
+        }
         const data = await response.json();
         if (!Array.isArray(data) || data.length === 0) break;
         allOrders = allOrders.concat(data);
@@ -211,14 +220,23 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
         return s1 !== 'STORNO' && s2 !== 'STORNO';
       });
 
+      console.log(`Finance: ${selectedMonth} → ${clean.length} orders fetched`);
+
       let totalRevenue = 0;
       clean.forEach(o => { totalRevenue += getRevenueWithoutVAT(o); });
       return totalRevenue;
     }
 
     fetchRevenue()
-      .then(rev => { setAutoRevenue(rev); setLoadingRevenue(false); })
-      .catch(() => setLoadingRevenue(false));
+      .then(rev => {
+        console.log(`Finance: ${selectedMonth} revenue = ${rev}`);
+        setAutoRevenue(rev);
+        setLoadingRevenue(false);
+      })
+      .catch(err => {
+        console.error(`Finance: fetch failed for ${selectedMonth}:`, err);
+        setLoadingRevenue(false);
+      });
   }, [selectedMonth, supabaseUrl, supabaseKey]);
 
   // Computed values
