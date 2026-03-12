@@ -1301,7 +1301,7 @@ export default function FinanceModule({ supabaseUrl, supabaseKey, userEmail }) {
             <span className="text-indigo-500 text-lg font-bold">%</span>
             <div>
               <span className="text-sm text-indigo-700 font-medium">PNO:</span>
-              <span className={`ml-2 text-lg font-bold ${pnoPct <= 30 ? 'text-green-700' : pnoPct <= 50 ? 'text-amber-600' : 'text-red-600'}`}>
+              <span className={`ml-2 text-lg font-bold ${pnoPct <= 20 ? 'text-green-700' : pnoPct <= 30 ? 'text-amber-600' : 'text-red-600'}`}>
                 {pnoPct.toFixed(1)} %
               </span>
               <span className="ml-2 text-xs text-indigo-400">
