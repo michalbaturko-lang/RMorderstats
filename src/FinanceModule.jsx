@@ -747,6 +747,137 @@ export default function FinanceModule({ supabaseUrl, supabaseKey, userEmail }) {
     setSelectedBankItems(new Set());
   }, [selectedBankItems, selectedMonth, monthAssigned, bankItems]);
 
+  // ─── Restore January 2026 data from known state ──────────────────────────
+  const restoreJanuary = useCallback(() => {
+    // 1) Set monthsData for January
+    setMonthsData(prev => ({
+      ...prev,
+      '2026-01': {
+        revenueManual: 2709000,
+        cogs: 1083600,
+        marketing: { ads: 520000, sklik: 70000, facebook: 0 },
+        cashExpenses: [
+          { id: genId(), description: 'Právní služby', amount: 20000 },
+          { id: genId(), description: 'Media call', amount: 70000 },
+          { id: genId(), description: 'Ruslan', amount: 45000 },
+          { id: genId(), description: 'Petr Jiříček', amount: 80000 },
+          { id: genId(), description: 'Kristýna', amount: 25000 },
+          { id: genId(), description: 'Honza', amount: 30000 },
+          { id: genId(), description: 'Ondra', amount: 9250 },
+          { id: genId(), description: 'Obchod provize', amount: 2772 },
+        ],
+      }
+    }));
+
+    // 2) Match existing bank items and assign to January with correct categories
+    const JANUARY_ITEMS = [
+      // Mzdy
+      { match: 'VOJTECH MIKULENKA', amount: 24850, cat: 'mzdy' },
+      { match: 'FU', amount: 8285, cat: 'mzdy', exact: true },
+      { match: 'OSSZ', amount: 28547, cat: 'mzdy' },
+      { match: 'Vseobecna zdravotni pojistovna', amount: 6681, cat: 'mzdy' },
+      { match: 'Vojenska zdravotni pojistovna', amount: 5400, cat: 'mzdy' },
+      { match: 'MZ202601', amount: 38888, cat: 'mzdy' },
+      { match: 'MZ202601', amount: 31930, cat: 'mzdy' },
+      // Jednorázové náklady
+      { match: 'Alza.cz', amount: 905, cat: 'jednorazove' },
+      { match: 'Alza.cz', amount: 26914, cat: 'jednorazove' },
+      { match: 'Alza.cz', amount: 1887, cat: 'jednorazove' },
+      { match: 'Alza.cz', amount: 623, cat: 'jednorazove' },
+      { match: 'IKEA CZ', amount: 14379, cat: 'jednorazove' },
+      { match: 'IKEA BRNO', amount: 5149, cat: 'jednorazove' },
+      { match: 'ROHLIK', amount: 1544, cat: 'jednorazove' },
+      { match: 'Adalbertinum', amount: 1590, cat: 'jednorazove' },
+      { match: 'BUFFALO STEAKHOUSE', amount: 600, cat: 'jednorazove' },
+      { match: 'BUFFALO STEAKHOUSE', amount: 550, cat: 'jednorazove' },
+      { match: 'PPL CZ', amount: 5925, cat: 'jednorazove' },
+      { match: 'ALBERT', amount: 2225, cat: 'jednorazove' },
+      { match: 'Pavillon Steak', amount: 850, cat: 'jednorazove' },
+      // Nájmy
+      { match: 'Euro Mall Brno', amount: 31341, cat: 'najmy' },
+      { match: 'Euro Mall Brno', amount: 12100, cat: 'najmy' },
+      { match: 'Euro Mall Brno', amount: 108900, cat: 'najmy' },
+      // Čína náklady
+      { match: 'Vizove centrum', amount: 2266, cat: 'cina' },
+      { match: 'AIR CHINA', amount: 7614, cat: 'cina' },
+      { match: 'Flughafen Wien', amount: 500, cat: 'cina' },
+      { match: 'Air China', amount: 6998, cat: 'cina' },
+      { match: 'TRIP.COM', amount: 1925, cat: 'cina' },
+      { match: 'Qingdaoruisheng', amount: 2854, cat: 'cina' },
+      { match: 'Beijing Yupinsi', amount: 635, cat: 'cina' },
+      { match: 'BEIJINGTIANLUN', amount: 11713, cat: 'cina' },
+      // SaaS
+      { match: 'HOLAFLY', amount: 797, cat: 'saas' },
+      { match: 'CLAUDE.AI', amount: 450, cat: 'saas' },
+      { match: 'BASE44', amount: 18934, cat: 'saas' },
+      { match: 'LOVABLE', amount: 500, cat: 'saas' },
+      { match: 'CLAUDE.AI', amount: 1900, cat: 'saas' },
+      { match: 'ANTHROPIC', amount: 129, cat: 'saas' },
+      { match: 'upgates.com TZEY', amount: 4901, cat: 'saas' },
+      { match: 'CLAUDE.AI', amount: 3094, cat: 'saas' },
+      { match: 'CLOUDFLARE', amount: 103, cat: 'saas' },
+      { match: 'HEYGEN', amount: 619, cat: 'saas' },
+      { match: 'ELEVENLABS', amount: 232, cat: 'saas' },
+      { match: 'upgates.com, Petra', amount: 3267, cat: 'saas' },
+      { match: 'SMARTLOOK', amount: 3024, cat: 'saas' },
+      // Ostatní pravidelné náklady
+      { match: '2011010000', amount: 799, cat: 'pravidelne' },
+      { match: '2011010000', amount: 349, cat: 'pravidelne' },
+      { match: 'FLoPack', amount: 3267, cat: 'pravidelne' },
+      { match: 'Technology Morava', amount: 1786, cat: 'pravidelne' },
+      { match: 'SMARTBIDDING', amount: 36300, cat: 'pravidelne' },
+      { match: 'Daktela', amount: 22131, cat: 'pravidelne' },
+      { match: 'Tomas Blaha', amount: 7986, cat: 'pravidelne' },
+      { match: 'Vodafone', amount: 3462, cat: 'pravidelne' },
+      { match: 'amccomp', amount: 5203, cat: 'pravidelne' },
+      { match: '123-2355600207', amount: 8071, cat: 'pravidelne' },
+      { match: 'MoravanyNET', amount: 2977, cat: 'pravidelne' },
+      { match: 'APPLE.COM', amount: 2799, cat: 'pravidelne' },
+      // Ostatní
+      { match: '70033-77628621', amount: 2403, cat: 'ostatni' },
+      { match: 'Action B029', amount: 553, cat: 'ostatni' },
+      { match: 'Property Point', amount: 18444, cat: 'ostatni' },
+      { match: '2401722011', amount: 3025, cat: 'ostatni' },
+      { match: 'E - ECONOMY', amount: 5324, cat: 'ostatni' },
+      { match: 'LUEKO', amount: 6050, cat: 'ostatni' },
+      { match: 'LUEKO', amount: 10890, cat: 'ostatni' },
+      { match: '26033963', amount: 24754, cat: 'ostatni' },
+      { match: '26033964', amount: 799, cat: 'ostatni' },
+    ];
+
+    const usedIds = new Set();
+    const newAssignments = {};
+    const toAssign = [];
+
+    JANUARY_ITEMS.forEach(spec => {
+      // Find matching bank item (not yet used)
+      const found = bankItems.find(bi => {
+        if (usedIds.has(bi.id)) return false;
+        const amountMatch = Math.abs(bi.amount - spec.amount) < 5;
+        if (spec.exact) {
+          return bi.description === spec.match && amountMatch;
+        }
+        return bi.description.toLowerCase().includes(spec.match.toLowerCase()) && amountMatch;
+      });
+      if (found) {
+        usedIds.add(found.id);
+        newAssignments[found.id] = spec.cat;
+        toAssign.push(found.id);
+      } else {
+        console.warn(`Finance restore: could not match "${spec.match}" (${spec.amount} Kč)`);
+      }
+    });
+
+    setAssignedItems(prev => ({
+      ...prev,
+      '2026-01': [...new Set([...(prev['2026-01'] || []), ...toAssign])]
+    }));
+    setItemCategories(prev => ({ ...prev, ...newAssignments }));
+
+    console.log(`Finance restore: matched ${toAssign.length}/${JANUARY_ITEMS.length} items for January`);
+    alert(`Leden obnoven! Přiřazeno ${toAssign.length} z ${JANUARY_ITEMS.length} položek.`);
+  }, [bankItems]);
+
   // Add single bank item
   const addBankItem = () => {
     if (!newItem.description || !newItem.amount) return;
@@ -1023,6 +1154,14 @@ export default function FinanceModule({ supabaseUrl, supabaseKey, userEmail }) {
           </select>
           {savingToCloud && <span className="text-xs text-blue-400 animate-pulse">☁️ Ukládám...</span>}
           {supabaseLoaded && !savingToCloud && <span className="text-xs text-green-500">☁️ Uloženo</span>}
+          {selectedMonth === '2026-01' && (monthAssigned.length === 0 || !currentData.revenueManual) && bankItems.length > 0 && (
+            <button
+              onClick={restoreJanuary}
+              className="px-3 py-1.5 text-xs font-medium bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition-colors border border-amber-200"
+            >
+              🔄 Obnovit leden z předchozího stavu
+            </button>
+          )}
         </div>
       </div>
 
