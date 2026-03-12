@@ -408,7 +408,8 @@ export default function FinanceModule({ supabaseUrl, supabaseKey, userEmail, sup
     saveFinanceState(state);
 
     // Debounced save to Supabase (1.5s after last change)
-    if (!supabaseClient || !userEmail) return;
+    // Don't save until we've loaded from Supabase first (prevents overwriting with empty data)
+    if (!supabaseClient || !userEmail || !supabaseLoaded) return;
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     saveTimeoutRef.current = setTimeout(async () => {
       try {
@@ -429,7 +430,7 @@ export default function FinanceModule({ supabaseUrl, supabaseKey, userEmail, sup
     }, 1500);
 
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
-  }, [selectedMonth, monthsData, bankItems, assignedItems, itemCategories, supabaseClient, userEmail]);
+  }, [selectedMonth, monthsData, bankItems, assignedItems, itemCategories, supabaseClient, userEmail, supabaseLoaded]);
 
   // Get/set current month data
   const currentData = monthsData[selectedMonth] || getDefaultMonthData(selectedMonth);
