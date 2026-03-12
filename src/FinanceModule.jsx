@@ -488,6 +488,15 @@ export default function FinanceModule({ supabaseUrl, supabaseKey, userEmail }) {
   const cashTotal = (currentData.cashExpenses || []).reduce((sum, ce) => sum + ce.amount, 0);
   const operatingTotal = assignedCostsTotal + cashTotal;
 
+  // Smart Bidding from assigned bank items for this month
+  const smartBiddingTotal = assignedBankItems
+    .filter(bi => /smartbidding/i.test(bi.description))
+    .reduce((sum, bi) => sum + bi.amount, 0);
+
+  // PNO = (Google + Sklik + Facebook + Smart Bidding) / obrat * 100
+  const pnoTotal = marketingTotal + smartBiddingTotal;
+  const pnoPct = revenue > 0 ? (pnoTotal / revenue) * 100 : 0;
+
   const hv1 = revenue - cogs;
   const hv2 = hv1 - marketingTotal;
   const hv3 = hv2 - operatingTotal;
@@ -1287,6 +1296,21 @@ export default function FinanceModule({ supabaseUrl, supabaseKey, userEmail }) {
               hint="Doplní Michal"
             />
           </div>
+          {/* PNO */}
+          <div className="flex items-center gap-3 bg-indigo-50 rounded-lg p-3">
+            <span className="text-indigo-500 text-lg font-bold">%</span>
+            <div>
+              <span className="text-sm text-indigo-700 font-medium">PNO:</span>
+              <span className={`ml-2 text-lg font-bold ${pnoPct <= 30 ? 'text-green-700' : pnoPct <= 50 ? 'text-amber-600' : 'text-red-600'}`}>
+                {pnoPct.toFixed(1)} %
+              </span>
+              <span className="ml-2 text-xs text-indigo-400">
+                ({formatCZK(pnoTotal)} / {formatCZK(revenue)}
+                {smartBiddingTotal > 0 ? ` · vč. Smart Bidding ${formatCZK(smartBiddingTotal)}` : ''})
+              </span>
+            </div>
+          </div>
+
           <div className="flex items-center gap-3 bg-purple-50 rounded-lg p-3">
             <span className="text-purple-500 text-lg">&#8594;</span>
             <div>
