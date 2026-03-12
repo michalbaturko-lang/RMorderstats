@@ -313,7 +313,7 @@ const CategorySection = ({ category, items, onDrop, onRemove, onMoveToCategory, 
 // Main FinanceModule
 // ═══════════════════════════════════════════════════════════════════════════
 
-export default function FinanceModule({ supabaseUrl, supabaseKey }) {
+export default function FinanceModule({ supabaseUrl, supabaseKey, userEmail }) {
   // Own Supabase client - no dependency on parent App
   const supabaseClient = useMemo(() => {
     if (supabaseUrl && supabaseKey) return createClient(supabaseUrl, supabaseKey);
@@ -336,6 +336,8 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
   const [hideAds, setHideAds] = useState(true);
   const [csvSource, setCsvSource] = useState('2026-01');
   const [expandedVendors, setExpandedVendors] = useState(new Set());
+  const [supabaseLoaded, setSupabaseLoaded] = useState(false);
+  const [savingToCloud, setSavingToCloud] = useState(false);
 
   // New bank item form
   const [newItem, setNewItem] = useState({ date: '', description: '', amount: '', source: '2026-01' });
@@ -344,10 +346,69 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
   // New cash expense form
   const [newCash, setNewCash] = useState({ description: '', amount: '' });
 
-  // Save to localStorage on changes
+  // ─── Load from Supabase on mount ──────────────────────────────────────────
   useEffect(() => {
-    saveFinanceState({ selectedMonth, monthsData, bankItems, assignedItems, itemCategories });
-  }, [selectedMonth, monthsData, bankItems, assignedItems, itemCategories]);
+    if (!supabaseClient || !userEmail) return;
+    (async () => {
+      try {
+        const { data, error } = await supabaseClient
+          .from('finance_state')
+          .select('state')
+          .eq('user_email', userEmail)
+          .single();
+        if (error && error.code !== 'PGRST116') {
+          console.error('Finance: failed to load from Supabase', error);
+          setSupabaseLoaded(true);
+          return;
+        }
+        if (data?.state) {
+          const s = data.state;
+          console.log('Finance: loaded state from Supabase');
+          if (s.selectedMonth) setSelectedMonth(s.selectedMonth);
+          if (s.monthsData) setMonthsData(s.monthsData);
+          if (s.bankItems) setBankItems(s.bankItems);
+          if (s.assignedItems) setAssignedItems(s.assignedItems);
+          if (s.itemCategories) setItemCategories(s.itemCategories);
+          // Also update localStorage as cache
+          saveFinanceState(s);
+        }
+      } catch (e) {
+        console.error('Finance: Supabase load error', e);
+      }
+      setSupabaseLoaded(true);
+    })();
+  }, [supabaseClient, userEmail]);
+
+  // ─── Save to localStorage + Supabase on changes ──────────────────────────
+  const saveTimeoutRef = React.useRef(null);
+  useEffect(() => {
+    const state = { selectedMonth, monthsData, bankItems, assignedItems, itemCategories };
+    // Always save to localStorage immediately
+    saveFinanceState(state);
+
+    // Debounced save to Supabase (1.5s after last change)
+    if (!supabaseClient || !userEmail) return;
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        setSavingToCloud(true);
+        const { error } = await supabaseClient
+          .from('finance_state')
+          .upsert({
+            user_email: userEmail,
+            state,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'user_email' });
+        if (error) console.error('Finance: Supabase save error', error);
+        else console.log('Finance: saved to Supabase');
+      } catch (e) {
+        console.error('Finance: Supabase save error', e);
+      }
+      setSavingToCloud(false);
+    }, 1500);
+
+    return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
+  }, [selectedMonth, monthsData, bankItems, assignedItems, itemCategories, supabaseClient, userEmail]);
 
   // Get/set current month data
   const currentData = monthsData[selectedMonth] || getDefaultMonthData(selectedMonth);
@@ -960,6 +1021,8 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
               <option key={m.value} value={m.value}>{m.label}</option>
             ))}
           </select>
+          {savingToCloud && <span className="text-xs text-blue-400 animate-pulse">☁️ Ukládám...</span>}
+          {supabaseLoaded && !savingToCloud && <span className="text-xs text-green-500">☁️ Uloženo</span>}
         </div>
       </div>
 
