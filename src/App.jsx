@@ -1393,7 +1393,7 @@ export default function App() {
             { id: 'tempo', l: '⏱ Tempo dne' },
             { id: 'geo', l: '📍 Geografie' },
             { id: 'b2b', l: '🏢 B2B / B2C' },
-            ...(user?.email === 'michal.baturko@regalmaster.cz' ? [{ id: 'finance', l: '💰 Finance' }] : [])
+            ...(['michal.baturko@regalmaster.cz', 'kristyna.vencel@regalmaster.cz'].includes(user?.email) ? [{ id: 'finance', l: '💰 Finance' }] : [])
           ].map(t => (
             <button 
               key={t.id} 
@@ -1944,7 +1944,7 @@ export default function App() {
             </>
           )}
 
-          {tab === 'finance' && user?.email === 'michal.baturko@regalmaster.cz' && (
+          {tab === 'finance' && ['michal.baturko@regalmaster.cz', 'kristyna.vencel@regalmaster.cz'].includes(user?.email) && (
             <FinanceModule supabaseUrl={SUPABASE_URL} supabaseKey={SUPABASE_KEY} userEmail={user?.email} />
           )}
 
