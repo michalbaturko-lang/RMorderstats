@@ -354,7 +354,7 @@ export default function FinanceModule({ supabaseUrl, supabaseKey, userEmail }) {
         const { data, error } = await supabaseClient
           .from('finance_state')
           .select('state')
-          .eq('user_email', userEmail)
+          .eq('user_email', 'shared')
           .single();
         if (error && error.code !== 'PGRST116') {
           console.error('Finance: failed to load from Supabase', error);
@@ -363,14 +363,34 @@ export default function FinanceModule({ supabaseUrl, supabaseKey, userEmail }) {
         }
         if (data?.state) {
           const s = data.state;
-          console.log('Finance: loaded state from Supabase');
+          console.log('Finance: loaded shared state from Supabase');
           if (s.selectedMonth) setSelectedMonth(s.selectedMonth);
           if (s.monthsData) setMonthsData(s.monthsData);
           if (s.bankItems) setBankItems(s.bankItems);
           if (s.assignedItems) setAssignedItems(s.assignedItems);
           if (s.itemCategories) setItemCategories(s.itemCategories);
-          // Also update localStorage as cache
           saveFinanceState(s);
+        } else {
+          // Migration: copy data from michal.baturko to shared
+          const { data: legacy } = await supabaseClient
+            .from('finance_state')
+            .select('state')
+            .eq('user_email', 'michal.baturko@regalmaster.cz')
+            .single();
+          if (legacy?.state) {
+            const s = legacy.state;
+            console.log('Finance: migrating data to shared');
+            if (s.selectedMonth) setSelectedMonth(s.selectedMonth);
+            if (s.monthsData) setMonthsData(s.monthsData);
+            if (s.bankItems) setBankItems(s.bankItems);
+            if (s.assignedItems) setAssignedItems(s.assignedItems);
+            if (s.itemCategories) setItemCategories(s.itemCategories);
+            saveFinanceState(s);
+            // Save as shared so migration happens only once
+            await supabaseClient
+              .from('finance_state')
+              .upsert({ user_email: 'shared', state: s, updated_at: new Date().toISOString() }, { onConflict: 'user_email' });
+          }
         }
       } catch (e) {
         console.error('Finance: Supabase load error', e);
@@ -395,7 +415,7 @@ export default function FinanceModule({ supabaseUrl, supabaseKey, userEmail }) {
         const { error } = await supabaseClient
           .from('finance_state')
           .upsert({
-            user_email: userEmail,
+            user_email: 'shared',
             state,
             updated_at: new Date().toISOString()
           }, { onConflict: 'user_email' });
