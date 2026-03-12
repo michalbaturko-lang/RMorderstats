@@ -313,12 +313,13 @@ const CategorySection = ({ category, items, onDrop, onRemove, onMoveToCategory, 
 // Main FinanceModule
 // ═══════════════════════════════════════════════════════════════════════════
 
-export default function FinanceModule({ supabaseUrl, supabaseKey, userEmail }) {
-  // Own Supabase client - no dependency on parent App
+export default function FinanceModule({ supabaseUrl, supabaseKey, userEmail, supabaseInstance }) {
+  // Use shared Supabase instance from App (has authenticated session) or create own
   const supabaseClient = useMemo(() => {
+    if (supabaseInstance) return supabaseInstance;
     if (supabaseUrl && supabaseKey) return createClient(supabaseUrl, supabaseKey);
     return null;
-  }, [supabaseUrl, supabaseKey]);
+  }, [supabaseInstance, supabaseUrl, supabaseKey]);
   const saved = useMemo(() => loadFinanceState(), []);
 
   const [selectedMonth, setSelectedMonth] = useState(saved?.selectedMonth || '2026-01');

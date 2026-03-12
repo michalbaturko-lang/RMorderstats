@@ -1945,7 +1945,7 @@ export default function App() {
           )}
 
           {tab === 'finance' && ['michal.baturko@regalmaster.cz', 'kristyna.vencel@regalmaster.cz'].includes(user?.email) && (
-            <FinanceModule supabaseUrl={SUPABASE_URL} supabaseKey={SUPABASE_KEY} userEmail={user?.email} />
+            <FinanceModule supabaseUrl={SUPABASE_URL} supabaseKey={SUPABASE_KEY} userEmail={user?.email} supabaseInstance={supabase} />
           )}
 
           {tab === 'b2b' && (
