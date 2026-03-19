@@ -45,6 +45,129 @@ const isAdsRelated = (description) => {
   return ADS_KEYWORDS.some(kw => lower.includes(kw));
 };
 
+const JANUARY_2026_BANK_ITEM_SPECS = [
+  ['seed-2026-01-mzdy-01', '02.02.2026', '20260002 VOJTECH MIKULENKA', 24850, 'mzdy'],
+  ['seed-2026-01-mzdy-02', '10.02.2026', 'FU', 8285, 'mzdy'],
+  ['seed-2026-01-mzdy-03', '10.02.2026', 'OSSZ', 28547, 'mzdy'],
+  ['seed-2026-01-mzdy-04', '10.02.2026', 'Všeobecná zdravotní pojišťovna ČR', 6681, 'mzdy'],
+  ['seed-2026-01-mzdy-05', '10.02.2026', 'Vojenská zdravotní pojišťovna ČR', 5400, 'mzdy'],
+  ['seed-2026-01-mzdy-06', '10.02.2026', 'MZ202601', 38888, 'mzdy'],
+  ['seed-2026-01-mzdy-07', '10.02.2026', 'MZ202601', 31930, 'mzdy'],
+
+  ['seed-2026-01-jed-01', '01.01.2026', 'Alza.cz a.s., Jankovcova 53, Prague', 905, 'jednorazove'],
+  ['seed-2026-01-jed-02', '01.01.2026', 'Alza.cz, Jankovcova, Prague', 26914, 'jednorazove'],
+  ['seed-2026-01-jed-03', '03.01.2026', 'Alza.cz a. s., Skorepka 336/15, Brno', 1887, 'jednorazove'],
+  ['seed-2026-01-jed-04', '04.01.2026', 'Alza.cz a. s., Skorepka 336/15, Brno', 623, 'jednorazove'],
+  ['seed-2026-01-jed-05', '05.01.2026', 'IKEA CZ ecom, Skandinavska 1131, PRAHA', 14379, 'jednorazove'],
+  ['seed-2026-01-jed-06', '06.01.2026', 'IKEA BRNO OD ECO, Skandinavska 4, Brno Dolni Her', 5149, 'jednorazove'],
+  ['seed-2026-01-jed-07', '06.01.2026', 'DEKUJEME, ROHLIK.CZ, Sokolovska 100/94, Prague 8', 1544, 'jednorazove'],
+  ['seed-2026-01-jed-08', '07.01.2026', 'Nove Adalbertinum, Velke namesti 32/40, Hr. Kralove', 1590, 'jednorazove'],
+  ['seed-2026-01-jed-09', '08.01.2026', 'BUFFALO STEAKHOUSE, KRIZKOVSKEHO 22416, BRNO', 600, 'jednorazove'],
+  ['seed-2026-01-jed-10', '20.01.2026', 'BUFFALO STEAKHOUSE, KRIZKOVSKEHO 22416, BRNO', 550, 'jednorazove'],
+  ['seed-2026-01-jed-11', '24.01.2026', 'PPL CZ s.r.o. – D06, Drckova 3, Brno-Lisen', 5925, 'jednorazove'],
+  ['seed-2026-01-jed-12', '26.01.2026', 'ALBERT VAM DEKUJE, U DALNICE 744, MODRICE', 2225, 'jednorazove'],
+  ['seed-2026-01-jed-13', '28.01.2026', 'Pavillon Steak House, Jezuitska 6, Brno', 850, 'jednorazove'],
+
+  ['seed-2026-01-naj-01', '09.02.2026', 'Euro Mall Brno Real Estate, s.r.o.', 31341, 'najmy'],
+  ['seed-2026-01-naj-02', '09.02.2026', 'Euro Mall Brno Real Estate, s.r.o.', 12100, 'najmy'],
+  ['seed-2026-01-naj-03', '09.02.2026', 'Euro Mall Brno Real Estate, s.r.o.', 108900, 'najmy'],
+
+  ['seed-2026-01-ost-01', '01.01.2026', 'Vizove centrum, Sokolovska 651/136a, Praha 8, 18600, CZE', 2266.49, 'ostatni'],
+  ['seed-2026-01-ost-02', '07.01.2026', 'AIR CHINA2601073363104, DUSSELDORFER STR 4, AIR TICKET, 60329, DEU', 7614, 'ostatni'],
+  ['seed-2026-01-ost-03', '08.01.2026', 'Flughafen Wien AG, Wien Flughafen / Postfach 1, Flughafen Wien, 1300, AUT', 500.49, 'ostatni'],
+  ['seed-2026-01-ost-04', '09.01.2026', 'Air China, Office Park 1/Top B05 02, Wien Flughafe, 1300, AUT', 6997.98, 'ostatni'],
+  ['seed-2026-01-ost-05', '10.01.2026', 'TRIP.COM, RHINUSPOORPLEIN 10, 38, AMSTERDAM, 1018TX, NLD', 1924.51, 'ostatni'],
+  ['seed-2026-01-ost-06', '12.01.2026', 'Qingdaoruishengyangjiu, QingDao, QingDao, 200001, CHN', 2854, 'ostatni'],
+  ['seed-2026-01-ost-07', '16.01.2026', 'Beijing Yupinsi Niang, F4128B 4th to 5t, Beijing, 518000, CHN', 634.5, 'ostatni'],
+  ['seed-2026-01-ost-08', '19.01.2026', 'BEIJINGTIANLUNWANGCHAO, BEIJINGSHIDONGCHENGQUWANGFUJINGDAJIE50HA, BEIJING, 000000, CHN', 11713, 'ostatni'],
+  ['seed-2026-01-ost-09', '09.01.2026', 'SP HOLAFLY.COM, 6th Floor, 2 Grand Canal Square, DUBLIN, D02 A342, IRL', 797.03, 'ostatni'],
+  ['seed-2026-01-ost-10', '13.01.2026', 'CLAUDE.AI SUBSCRIPTION, 548 Market Street PMB 90375, SAN FRANCISCO, 94104, USA', 450, 'ostatni'],
+  ['seed-2026-01-ost-11', '18.01.2026', 'BASE44, 100 Gansevoort Street, NEW YORK, 10014, USA', 18934, 'ostatni'],
+  ['seed-2026-01-ost-12', '18.01.2026', 'LOVABLE, 1111b South Governors Avenue, DOVER, 19904, USA', 500, 'ostatni'],
+  ['seed-2026-01-ost-13', '20.01.2026', 'CLAUDE.AI SUBSCRIPTION, 548 Market Street PMB 90375, SAN FRANCISCO, 94104, USA', 1900, 'ostatni'],
+  ['seed-2026-01-ost-14', '23.01.2026', 'ANTHROPIC, 548 Market Street PMB 90375, SAN FRANCISCO, 94104, USA', 129, 'ostatni'],
+  ['seed-2026-01-ost-15', '23.01.2026', 'www.upgates.com TZEY-ALI5-QQEK', 4901, 'ostatni'],
+  ['seed-2026-01-ost-16', '01.02.2026', 'CLAUDE.AI SUBSCRIPTION, 548 Market Street PMB 90375, SAN FRANCISCO, 94104, USA', 3094, 'ostatni'],
+  ['seed-2026-01-ost-17', '01.02.2026', 'CLOUDFLARE, 101 Townsend Street, SAN FRANCISCO, 94107, USA', 103, 'ostatni'],
+  ['seed-2026-01-ost-18', '02.02.2026', 'HEYGEN TECHNOLOGY INC., 12130 Millennium Drive Suite 300, LOS ANGELES, 90094, USA', 619, 'ostatni'],
+  ['seed-2026-01-ost-19', '02.02.2026', 'ELEVENLABS.IO, 169 Madison Ave #2484, NEW YORK, 10016, USA', 232, 'ostatni'],
+  ['seed-2026-01-ost-20', '21.02.2026', 'upgates.com, Petra Bezruce 139, Stitina, 747 91, CZE', 3267, 'ostatni'],
+  ['seed-2026-01-ost-21', '22.02.2026', 'WWW.SMARTLOOK.COM, Sumavska 524/31 Veveri, BRNO, 60200, CZE', 3024, 'ostatni'],
+  ['seed-2026-01-ost-22', '07.01.2026', '2011010000', 799, 'ostatni'],
+  ['seed-2026-01-ost-23', '07.01.2026', '2011010000', 349, 'ostatni'],
+  ['seed-2026-01-ost-24', '16.01.2026', 'FLoPack s.r.o.', 3267, 'ostatni'],
+  ['seed-2026-01-ost-25', '23.01.2026', 'Technology Morava, spol. s r.o.', 1786, 'ostatni'],
+  ['seed-2026-01-ost-26', '12.02.2026', '20260003 SMARTBIDDING S.R.O.', 36300, 'ostatni'],
+  ['seed-2026-01-ost-27', '15.02.2026', 'Daktela s.r.o.', 22131, 'ostatni'],
+  ['seed-2026-01-ost-28', '16.02.2026', 'Tomas Blaha', 7986, 'ostatni'],
+  ['seed-2026-01-ost-29', '18.02.2026', 'Vodafone', 3462, 'ostatni'],
+  ['seed-2026-01-ost-30', '23.02.2026', 'virtualni server amccomp s.r.o.', 5203, 'ostatni'],
+  ['seed-2026-01-ost-31', '24.02.2026', '123-2355600207', 8071, 'ostatni'],
+  ['seed-2026-01-ost-32', '24.02.2026', 'MoravanyNET s.r.o.', 2977, 'ostatni'],
+  ['seed-2026-01-ost-33', '26.02.2026', 'APPLE.COM/CZ, Hollyhill Industrial Estate, H, CORK, T23 YK84, IRL', 2799, 'ostatni'],
+  ['seed-2026-01-ost-34', '23.01.2026', '70033-77628621', 2403, 'ostatni'],
+  ['seed-2026-01-ost-35', '24.01.2026', 'Action B029, Kashtanova -, Brno-Turany, 62000, CZE', 553, 'ostatni'],
+  ['seed-2026-01-ost-36', '16.02.2026', 'Property Point FN s.r.o.', 18444, 'ostatni'],
+  ['seed-2026-01-ost-37', '17.02.2026', '2401722011', 3025, 'ostatni'],
+  ['seed-2026-01-ost-38', '23.02.2026', 'E - ECONOMY, s.r.o.', 5324, 'ostatni'],
+  ['seed-2026-01-ost-39', '23.02.2026', 'LUEKO s.r.o.', 6050, 'ostatni'],
+  ['seed-2026-01-ost-40', '23.02.2026', 'LUEKO s.r.o.', 10890, 'ostatni'],
+  ['seed-2026-01-ost-41', '25.02.2026', '26033963', 24754, 'ostatni'],
+  ['seed-2026-01-ost-42', '25.02.2026', '26033964', 799, 'ostatni'],
+];
+
+const JANUARY_2026_CASH_EXPENSE_SPECS = [
+  ['seed-2026-01-cash-01', 'Právní služby', 20000],
+  ['seed-2026-01-cash-02', 'Media call', 70000],
+  ['seed-2026-01-cash-03', 'Ruslan', 45000],
+  ['seed-2026-01-cash-04', 'Petr Jiříček', 80000],
+  ['seed-2026-01-cash-05', 'Kristýna', 25000],
+  ['seed-2026-01-cash-06', 'Honza', 30000],
+  ['seed-2026-01-cash-07', 'Ondra', 9250],
+  ['seed-2026-01-cash-08', 'Obchod provize', 2772],
+];
+
+const JANUARY_2026_SEED_STATE = (() => {
+  const bankItems = JANUARY_2026_BANK_ITEM_SPECS.map(([id, date, description, amount, category]) => ({
+    id,
+    date,
+    description,
+    amount,
+    source: '2026-01',
+    adsRelated: isAdsRelated(description),
+    seedCategory: category,
+  }));
+
+  const cashExpenses = JANUARY_2026_CASH_EXPENSE_SPECS.map(([id, description, amount]) => ({
+    id,
+    description,
+    amount,
+  }));
+
+  return {
+    selectedMonth: '2026-01',
+    monthsData: {
+      '2026-01': {
+        revenueManual: 2709000,
+        cogs: 1083600,
+        marketing: {
+          ads: 520000,
+          sklik: 70000,
+          facebook: 0,
+        },
+        cashExpenses,
+      },
+    },
+    bankItems,
+    assignedItems: {
+      '2026-01': bankItems.map(item => item.id),
+    },
+    itemCategories: Object.fromEntries(
+      JANUARY_2026_BANK_ITEM_SPECS.map(([id, _date, _description, _amount, category]) => [id, category])
+    ),
+  };
+})();
+
 const getDefaultMonthData = (month) => ({
   revenueManual: null,
   cogs: 0,
@@ -102,6 +225,47 @@ const getFinanceSyncErrorMessage = (error) => {
     return 'Sync není připravený: v Supabase chybí tabulka finance_state.';
   }
   return `Sync selhal: ${error?.message || 'neznámá chyba'}`;
+};
+
+const hasJanuary2026Data = (state) => {
+  const januaryData = state?.monthsData?.['2026-01'];
+  const januaryAssigned = state?.assignedItems?.['2026-01'] || [];
+
+  return Boolean(
+    januaryAssigned.length > 0 ||
+    januaryData?.revenueManual !== null && januaryData?.revenueManual !== undefined ||
+    Number(januaryData?.cogs || 0) > 0 ||
+    Number(januaryData?.marketing?.ads || 0) > 0 ||
+    Number(januaryData?.marketing?.sklik || 0) > 0 ||
+    Number(januaryData?.marketing?.facebook || 0) > 0 ||
+    (januaryData?.cashExpenses || []).length > 0
+  );
+};
+
+const ensureJanuary2026Seed = (state) => {
+  if (hasJanuary2026Data(state)) return state;
+
+  const baseState = state || {};
+  const existingBankItems = baseState.bankItems || [];
+  const existingBankItemIds = new Set(existingBankItems.map(item => item.id));
+  const missingSeedBankItems = JANUARY_2026_SEED_STATE.bankItems.filter(item => !existingBankItemIds.has(item.id));
+
+  return {
+    selectedMonth: baseState.selectedMonth || JANUARY_2026_SEED_STATE.selectedMonth,
+    monthsData: {
+      ...(baseState.monthsData || {}),
+      '2026-01': JANUARY_2026_SEED_STATE.monthsData['2026-01'],
+    },
+    bankItems: [...existingBankItems, ...missingSeedBankItems],
+    assignedItems: {
+      ...(baseState.assignedItems || {}),
+      '2026-01': [...JANUARY_2026_SEED_STATE.assignedItems['2026-01']],
+    },
+    itemCategories: {
+      ...(baseState.itemCategories || {}),
+      ...JANUARY_2026_SEED_STATE.itemCategories,
+    },
+  };
 };
 
 // ─── AI Category classification ───────────────────────────────────────────
@@ -414,7 +578,7 @@ export default function FinanceModule({ supabaseUrl, supabaseKey, userEmail }) {
     if (supabaseUrl && supabaseKey) return createClient(supabaseUrl, supabaseKey);
     return null;
   }, [supabaseUrl, supabaseKey]);
-  const saved = useMemo(() => loadFinanceState(), []);
+  const saved = useMemo(() => ensureJanuary2026Seed(loadFinanceState()), []);
   const saveTimeoutRef = useRef(null);
 
   const [selectedMonth, setSelectedMonth] = useState(saved?.selectedMonth || '2026-01');
@@ -467,13 +631,14 @@ export default function FinanceModule({ supabaseUrl, supabaseKey, userEmail }) {
     let cancelled = false;
 
     const applyState = (state) => {
-      if (!state || cancelled) return;
-      setSelectedMonth(state.selectedMonth || '2026-01');
-      setMonthsData(state.monthsData || {});
-      setBankItems(state.bankItems || []);
-      setAssignedItems(state.assignedItems || {});
-      setItemCategories(state.itemCategories || {});
-      saveFinanceState(state);
+      const normalizedState = ensureJanuary2026Seed(state);
+      if (!normalizedState || cancelled) return;
+      setSelectedMonth(normalizedState.selectedMonth || '2026-01');
+      setMonthsData(normalizedState.monthsData || {});
+      setBankItems(normalizedState.bankItems || []);
+      setAssignedItems(normalizedState.assignedItems || {});
+      setItemCategories(normalizedState.itemCategories || {});
+      saveFinanceState(normalizedState);
     };
 
     const loadSharedState = async () => {
