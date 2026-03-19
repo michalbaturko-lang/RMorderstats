@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
 const genId = () => Math.random().toString(36).substr(2, 9);
@@ -57,6 +57,7 @@ const getDefaultMonthData = (month) => ({
 });
 
 const STORAGE_KEY = 'rm_finance_v1';
+const SHARED_FINANCE_ROW_KEY = 'shared';
 
 const loadFinanceState = () => {
   try {
@@ -70,6 +71,37 @@ const saveFinanceState = (state) => {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch (e) { /* ignore */ }
+};
+
+const buildFinanceState = ({ selectedMonth, monthsData, bankItems, assignedItems, itemCategories }) => ({
+  selectedMonth,
+  monthsData,
+  bankItems,
+  assignedItems,
+  itemCategories,
+});
+
+const hasMeaningfulFinanceState = (state) => {
+  if (!state) return false;
+
+  return (
+    Object.keys(state.monthsData || {}).length > 0 ||
+    (state.bankItems || []).length > 0 ||
+    Object.values(state.assignedItems || {}).some(ids => Array.isArray(ids) && ids.length > 0) ||
+    Object.keys(state.itemCategories || {}).length > 0
+  );
+};
+
+const isMissingFinanceStateTableError = (error) => (
+  error?.code === 'PGRST205' ||
+  (error?.message || '').includes("Could not find the table 'public.finance_state'")
+);
+
+const getFinanceSyncErrorMessage = (error) => {
+  if (isMissingFinanceStateTableError(error)) {
+    return 'Sync není připravený: v Supabase chybí tabulka finance_state.';
+  }
+  return `Sync selhal: ${error?.message || 'neznámá chyba'}`;
 };
 
 // ─── AI Category classification ───────────────────────────────────────────
@@ -376,13 +408,14 @@ const CategoryColumn = ({ category, items, onDrop, onRemove, onMoveToCategory, a
 // Main FinanceModule
 // ═══════════════════════════════════════════════════════════════════════════
 
-export default function FinanceModule({ supabaseUrl, supabaseKey }) {
+export default function FinanceModule({ supabaseUrl, supabaseKey, userEmail }) {
   // Own Supabase client - no dependency on parent App
   const supabaseClient = useMemo(() => {
     if (supabaseUrl && supabaseKey) return createClient(supabaseUrl, supabaseKey);
     return null;
   }, [supabaseUrl, supabaseKey]);
   const saved = useMemo(() => loadFinanceState(), []);
+  const saveTimeoutRef = useRef(null);
 
   const [selectedMonth, setSelectedMonth] = useState(saved?.selectedMonth || '2026-01');
   const [monthsData, setMonthsData] = useState(saved?.monthsData || {});
@@ -399,6 +432,11 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
   const [hideAds, setHideAds] = useState(true);
   const [csvSource, setCsvSource] = useState('2026-01');
   const [expandedVendors, setExpandedVendors] = useState(new Set());
+  const [financeSyncReady, setFinanceSyncReady] = useState(!supabaseClient || !userEmail);
+  const [financeSyncSaving, setFinanceSyncSaving] = useState(false);
+  const [financeSyncError, setFinanceSyncError] = useState(null);
+  const [financeSyncDisabled, setFinanceSyncDisabled] = useState(false);
+  const [hasRemoteFinanceState, setHasRemoteFinanceState] = useState(false);
 
   // New bank item form
   const [newItem, setNewItem] = useState({ date: '', description: '', amount: '', source: '2026-01' });
@@ -407,10 +445,158 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
   // New cash expense form
   const [newCash, setNewCash] = useState({ description: '', amount: '' });
 
-  // Save to localStorage on changes
+  const financeState = useMemo(() => buildFinanceState({
+    selectedMonth,
+    monthsData,
+    bankItems,
+    assignedItems,
+    itemCategories,
+  }), [selectedMonth, monthsData, bankItems, assignedItems, itemCategories]);
+
+  // Keep local storage as a backup, but treat Supabase as the shared source of truth.
   useEffect(() => {
-    saveFinanceState({ selectedMonth, monthsData, bankItems, assignedItems, itemCategories });
-  }, [selectedMonth, monthsData, bankItems, assignedItems, itemCategories]);
+    saveFinanceState(financeState);
+  }, [financeState]);
+
+  useEffect(() => {
+    if (!supabaseClient || !userEmail) {
+      setFinanceSyncReady(true);
+      return;
+    }
+
+    let cancelled = false;
+
+    const applyState = (state) => {
+      if (!state || cancelled) return;
+      setSelectedMonth(state.selectedMonth || '2026-01');
+      setMonthsData(state.monthsData || {});
+      setBankItems(state.bankItems || []);
+      setAssignedItems(state.assignedItems || {});
+      setItemCategories(state.itemCategories || {});
+      saveFinanceState(state);
+    };
+
+    const loadSharedState = async () => {
+      try {
+        setFinanceSyncError(null);
+        setFinanceSyncDisabled(false);
+
+        const { data: sharedRow, error: sharedError } = await supabaseClient
+          .from('finance_state')
+          .select('state')
+          .eq('user_email', SHARED_FINANCE_ROW_KEY)
+          .maybeSingle();
+
+        if (sharedError && sharedError.code !== 'PGRST116') {
+          throw sharedError;
+        }
+
+        if (sharedRow?.state && hasMeaningfulFinanceState(sharedRow.state)) {
+          applyState(sharedRow.state);
+          setHasRemoteFinanceState(true);
+          return;
+        }
+
+        const { data: legacyRow, error: legacyError } = await supabaseClient
+          .from('finance_state')
+          .select('state')
+          .eq('user_email', 'michal.baturko@regalmaster.cz')
+          .maybeSingle();
+
+        if (legacyError && legacyError.code !== 'PGRST116') {
+          throw legacyError;
+        }
+
+        if (legacyRow?.state && hasMeaningfulFinanceState(legacyRow.state)) {
+          applyState(legacyRow.state);
+          const { error: migrateError } = await supabaseClient
+            .from('finance_state')
+            .upsert({
+              user_email: SHARED_FINANCE_ROW_KEY,
+              state: legacyRow.state,
+              updated_at: new Date().toISOString(),
+            }, { onConflict: 'user_email' });
+
+          if (migrateError) throw migrateError;
+
+          setHasRemoteFinanceState(true);
+          return;
+        }
+
+        if (hasMeaningfulFinanceState(saved)) {
+          const { error: seedError } = await supabaseClient
+            .from('finance_state')
+            .upsert({
+              user_email: SHARED_FINANCE_ROW_KEY,
+              state: saved,
+              updated_at: new Date().toISOString(),
+            }, { onConflict: 'user_email' });
+
+          if (seedError) throw seedError;
+
+          setHasRemoteFinanceState(true);
+        }
+      } catch (error) {
+        console.error('Finance: failed to hydrate shared state', error);
+        if (!cancelled) {
+          setFinanceSyncError(getFinanceSyncErrorMessage(error));
+          setFinanceSyncDisabled(isMissingFinanceStateTableError(error));
+        }
+      } finally {
+        if (!cancelled) {
+          setFinanceSyncReady(true);
+        }
+      }
+    };
+
+    loadSharedState();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [saved, supabaseClient, userEmail]);
+
+  useEffect(() => {
+    if (!supabaseClient || !userEmail || !financeSyncReady || financeSyncDisabled) return undefined;
+    if (!hasRemoteFinanceState && !hasMeaningfulFinanceState(financeState)) return undefined;
+
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        setFinanceSyncSaving(true);
+
+        const { error } = await supabaseClient
+          .from('finance_state')
+          .upsert({
+            user_email: SHARED_FINANCE_ROW_KEY,
+            state: financeState,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'user_email' });
+
+        if (error) throw error;
+
+        setHasRemoteFinanceState(true);
+        setFinanceSyncError(null);
+      } catch (error) {
+        console.error('Finance: failed to save shared state', error);
+        setFinanceSyncError(getFinanceSyncErrorMessage(error));
+        if (isMissingFinanceStateTableError(error)) {
+          setFinanceSyncDisabled(true);
+        }
+      } finally {
+        setFinanceSyncSaving(false);
+      }
+    }, 1200);
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [financeState, financeSyncDisabled, financeSyncReady, hasRemoteFinanceState, supabaseClient, userEmail]);
 
   // Get/set current month data
   const currentData = monthsData[selectedMonth] || getDefaultMonthData(selectedMonth);
@@ -968,6 +1154,25 @@ export default function FinanceModule({ supabaseUrl, supabaseKey }) {
               <option key={m.value} value={m.value}>{m.label}</option>
             ))}
           </select>
+          {userEmail && (
+            <span className={`text-sm ${
+              financeSyncError
+                ? 'text-amber-600'
+                : financeSyncSaving
+                  ? 'text-blue-600'
+                  : financeSyncReady
+                    ? 'text-emerald-600'
+                    : 'text-slate-400'
+            }`}>
+              {financeSyncError
+                ? `☁️ ${financeSyncError}`
+                : financeSyncSaving
+                  ? '☁️ Ukládám do Supabase'
+                  : financeSyncReady
+                    ? '☁️ Uloženo v Supabase'
+                    : '☁️ Načítám ze Supabase'}
+            </span>
+          )}
         </div>
       </div>
 

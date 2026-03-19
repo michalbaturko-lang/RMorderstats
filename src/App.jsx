@@ -18,6 +18,7 @@ const SUPABASE_URL = 'https://oonnawrfsbsbuijmfcqj.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9vbm5hd3Jmc2JzYnVpam1mY3FqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzMjA4ODcsImV4cCI6MjA4NTg5Njg4N30.d1jk1BYOc6eEx-KJzGpW3ekfDs4jxW10VgKmLef8f1Y';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const FINANCE_ALLOWED_EMAILS = ['michal.baturko@regalmaster.cz', 'kristyna.vencel@regalmaster.cz'];
 
 const LOADING_MESSAGES = [
   "🔧 Stavím regál...",
@@ -1238,7 +1239,7 @@ export default function App() {
             { id: 'tempo', l: '⏱ Tempo dne' },
             { id: 'geo', l: '📍 Geografie' },
             { id: 'b2b', l: '🏢 B2B / B2C' },
-            ...(user?.email === 'michal.baturko@regalmaster.cz' ? [{ id: 'finance', l: '💰 Finance' }] : [])
+            ...(FINANCE_ALLOWED_EMAILS.includes(user?.email || '') ? [{ id: 'finance', l: '💰 Finance' }] : [])
           ].map(t => (
             <button 
               key={t.id} 
@@ -1789,8 +1790,8 @@ export default function App() {
             </>
           )}
 
-          {tab === 'finance' && user?.email === 'michal.baturko@regalmaster.cz' && (
-            <FinanceModule supabaseUrl={SUPABASE_URL} supabaseKey={SUPABASE_KEY} />
+          {tab === 'finance' && FINANCE_ALLOWED_EMAILS.includes(user?.email || '') && (
+            <FinanceModule supabaseUrl={SUPABASE_URL} supabaseKey={SUPABASE_KEY} userEmail={user?.email} />
           )}
 
           {tab === 'b2b' && (
