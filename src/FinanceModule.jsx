@@ -397,7 +397,7 @@ const HVCard = ({ label, value, color, sub }) => {
   );
 };
 
-// ─── Category Column Component ───────────────────────────────────────────
+// ─── Category Section Component ──────────────────────────────────────────
 const CategoryColumn = ({ category, items, onDrop, onRemove, onMoveToCategory, allCategories, expandedVendors, toggleVendor }) => {
   const [dropActive, setDropActive] = useState(false);
 
@@ -448,7 +448,7 @@ const CategoryColumn = ({ category, items, onDrop, onRemove, onMoveToCategory, a
   }, [onDrop, category.id]);
 
   return (
-    <div className={`rounded-xl border ${colors.border} overflow-hidden flex flex-col`}>
+    <div className={`w-full rounded-xl border ${colors.border} overflow-hidden flex flex-col`}>
       {/* Header */}
       <div className={`${colors.header} text-white px-3 py-2 flex items-center justify-between`}>
         <div className="flex items-center gap-2">
@@ -1714,7 +1714,7 @@ export default function FinanceModule({ supabaseUrl, supabaseKey, userEmail }) {
               )}
             </div>
 
-            {/* BOTTOM: Category columns */}
+            {/* BOTTOM: Category sections */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-semibold text-slate-700">
@@ -1725,8 +1725,8 @@ export default function FinanceModule({ supabaseUrl, supabaseKey, userEmail }) {
                 </span>
               </div>
 
-              {/* Category columns grid - horizontal row */}
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-3">
+              {/* Category sections stacked vertically */}
+              <div className="space-y-3 mb-3">
                 {EXPENSE_CATEGORIES.map(cat => (
                   <CategoryColumn
                     key={cat.id}
