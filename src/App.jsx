@@ -52,13 +52,14 @@ const LOADING_MESSAGES = [
 const DAYS = ['Ne', 'Po', 'Út', 'St', 'Čt', 'Pá', 'So'];
 const DAYS_FULL = ['Neděle', 'Pondělí', 'Úterý', 'Středa', 'Čtvrtek', 'Pátek', 'Sobota'];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
-const CURRENCY_RATES = { CZK: 1, EUR: 25.2, HUF: 0.063 };
+const CURRENCY_RATES = { CZK: 1, EUR: 25.2, HUF: 0.063, RON: 5.1 };
 const MARKET_LABELS = { all: 'Všechny země', cz: 'Česko', sk: 'Slovensko', hu: 'Maďarsko', ro: 'Rumunsko', unknown: 'Neznámá země' };
 
 const BIG_CITIES = {
   cz: ['praha', 'brno', 'ostrava', 'plzeň', 'plzen', 'liberec', 'olomouc', 'budějovic', 'budejovic', 'hradec králové', 'hradec', 'ústí nad labem', 'usti', 'pardubice', 'zlín', 'zlin', 'havířov', 'havirov', 'kladno', 'most', 'opava', 'frýdek', 'frydek', 'karviná', 'karvina', 'jihlava', 'teplice', 'děčín', 'decin', 'karlovy vary'],
   sk: ['bratislava', 'košice', 'kosice', 'prešov', 'presov', 'žilina', 'zilina', 'nitra', 'banská bystrica', 'bystrica', 'trnava', 'martin', 'trenčín', 'trencin', 'poprad'],
   hu: ['budapest', 'debrecen', 'szeged', 'miskolc', 'pécs', 'pecs', 'győr', 'gyor', 'nyíregyháza', 'nyiregyhaza', 'kecskemét', 'kecskemet', 'székesfehérvár', 'szekesfehervar'],
+  ro: ['bucharest', 'bucuresti', 'cluj', 'timisoara', 'iasi', 'constanta', 'brasov', 'craiova', 'galati', 'ploiesti', 'oradea', 'sibiu', 'arad', 'pitesti', 'bacau', 'braila', 'targu mures', 'baia mare', 'botosani', 'suceava'],
 };
 
 const CITY_AGGREGATION = {
@@ -883,7 +884,7 @@ export default function App() {
 
   const tempoAvailableMarkets = useMemo(() => {
     const markets = Array.from(new Set(tempoDailyRecords.map((r) => r.market)));
-    const preferred = ['cz', 'sk', 'hu', 'unknown'].filter((m) => markets.includes(m));
+    const preferred = ['cz', 'sk', 'hu', 'ro', 'unknown'].filter((m) => markets.includes(m));
     const rest = markets.filter((m) => !preferred.includes(m)).sort();
     return [...preferred, ...rest];
   }, [tempoDailyRecords]);
@@ -1006,7 +1007,7 @@ export default function App() {
       bucket.count += 1;
     });
 
-    const marketOrder = ['cz', 'sk', 'hu', 'unknown'];
+    const marketOrder = ['cz', 'sk', 'hu', 'ro', 'unknown'];
     const marketKeys = Array.from(byMarket.keys()).sort((a, b) => {
       const ai = marketOrder.indexOf(a);
       const bi = marketOrder.indexOf(b);
@@ -1208,7 +1209,8 @@ export default function App() {
             { c: 'all', f: '🌍', n: 'Všechny země' }, 
             { c: 'cz', f: '🇨🇿', n: 'Česko' }, 
             { c: 'sk', f: '🇸🇰', n: 'Slovensko' }, 
-            { c: 'hu', f: '🇭🇺', n: 'Maďarsko' }
+            { c: 'hu', f: '🇭🇺', n: 'Maďarsko' },
+            { c: 'ro', f: '🇷🇴', n: 'Rumunsko' }
           ].map(x => (
             <button 
               key={x.c} 

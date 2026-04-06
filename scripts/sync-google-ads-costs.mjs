@@ -18,6 +18,7 @@
  * - SYNC_DAYS_BACK (default: 14)
  * - SYNC_FROM_DATE (YYYY-MM-DD)
  * - SYNC_TO_DATE (YYYY-MM-DD)
+ * - SYNC_MARKETS (comma-separated markets, e.g. "ro" or "cz,sk")
  * - FX_RATES_JSON (default: {"CZK":1,"EUR":25.2,"HUF":0.063,"RON":5.1})
  *
  * Accounts JSON supports:
@@ -93,6 +94,23 @@ function isAccountActiveForRange(account, from, to) {
   const activeFrom = account.activeFrom || '1900-01-01';
   const activeTo = account.activeTo || '2999-12-31';
   return !(activeTo < from || activeFrom > to);
+}
+
+function parseMarketFilter() {
+  const raw = process.env.SYNC_MARKETS || '';
+  const markets = raw
+    .split(',')
+    .map((market) => market.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (!markets.length) return null;
+
+  const invalid = markets.filter((market) => !SUPPORTED_MARKETS.has(market));
+  if (invalid.length) {
+    throw new Error(`Unsupported market(s) in SYNC_MARKETS: ${invalid.join(', ')}`);
+  }
+
+  return new Set(markets);
 }
 
 async function fetchAccessToken() {
@@ -222,6 +240,7 @@ async function main() {
   const loginCustomerId = normalizeCustomerId(process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || '');
   const rawAccounts = parseJsonEnv('GOOGLE_ADS_ACCOUNTS_JSON', []);
   const fxRates = parseJsonEnv('FX_RATES_JSON', DEFAULT_FX_RATES);
+  const marketFilter = parseMarketFilter();
 
   if (!Array.isArray(rawAccounts) || !rawAccounts.length) {
     throw new Error('GOOGLE_ADS_ACCOUNTS_JSON must be a non-empty JSON array');
@@ -244,6 +263,9 @@ async function main() {
       if (!SUPPORTED_MARKETS.has(account.market)) {
         throw new Error(`Unsupported market "${account.market}" in GOOGLE_ADS_ACCOUNTS_JSON`);
       }
+      if (marketFilter && !marketFilter.has(account.market)) {
+        return false;
+      }
       return isAccountActiveForRange(account, from, to);
     });
 
@@ -252,7 +274,8 @@ async function main() {
     return;
   }
 
-  console.log(`[sync-google-ads-costs] Start sync ${from} -> ${to} (${accounts.length} account(s))`);
+  const marketLabel = marketFilter ? ` markets=${Array.from(marketFilter).join(',')}` : '';
+  console.log(`[sync-google-ads-costs] Start sync ${from} -> ${to} (${accounts.length} account(s)${marketLabel})`);
 
   const accessToken = await fetchAccessToken();
   const fetchedAt = new Date().toISOString();

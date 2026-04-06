@@ -43,14 +43,16 @@ Recommended `GOOGLE_ADS_ACCOUNTS_JSON` for your current setup:
   { "market": "sk", "customerId": "257-933-8188", "enabled": true },
   { "market": "hu", "customerId": "196-153-9480", "enabled": true },
   { "market": "sk", "customerId": "176-019-1298", "enabled": false },
-  { "market": "ro", "customerId": "471-804-3625", "enabled": false }
+  { "market": "ro", "customerId": "471-804-3625", "enabled": true, "activeFrom": "2026-03-01" }
 ]
 ```
 
 Notes:
 
 - `enabled: false` means the account is ignored by the sync.
-- When Romania launches, switch `enabled` on account `471-804-3625` to `true`.
+- Romania should be backfilled from `2026-03-01` onward.
+- For a one-time Romania-only backfill, run `npm run sync:ads-costs:ro-backfill`.
+- If you want to run it manually, use `SYNC_FROM_DATE=2026-03-01 SYNC_MARKETS=ro`.
 - You can also use `activeFrom` / `activeTo` per account if needed.
 
 ## 4) Run the workflow
@@ -65,6 +67,18 @@ Runs every 4 hours and can also be started manually (`workflow_dispatch`).
 
 ```bash
 node scripts/sync-google-ads-costs.mjs
+```
+
+Full sync for all four active markets:
+
+```bash
+npm run sync:ads-costs:all
+```
+
+Romania-only backfill:
+
+```bash
+npm run sync:ads-costs:ro-backfill
 ```
 
 Use env vars from step 3.

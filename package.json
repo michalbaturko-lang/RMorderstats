@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "sync:ads-costs": "node scripts/sync-google-ads-costs.mjs"
+    "sync:ads-costs": "node scripts/sync-google-ads-costs.mjs",
+    "sync:ads-costs:all": "SYNC_MARKETS=cz,sk,hu,ro node scripts/sync-google-ads-costs.mjs",
+    "sync:ads-costs:ro-backfill": "SYNC_FROM_DATE=2026-03-01 SYNC_MARKETS=ro node scripts/sync-google-ads-costs.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.95.3",

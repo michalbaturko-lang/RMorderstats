@@ -27,7 +27,7 @@ const BANK_SOURCES = [
 const formatNum = (num) => Math.round(num).toLocaleString('cs-CZ');
 const formatCZK = (num) => `${formatNum(num)} Kč`;
 
-const CURRENCY_RATES = { CZK: 1, EUR: 25.2, HUF: 0.063 };
+const CURRENCY_RATES = { CZK: 1, EUR: 25.2, HUF: 0.063, RON: 5.1 };
 
 const getRevenueWithoutVAT = (order) => {
   const products = order.raw_data?.products || [];
