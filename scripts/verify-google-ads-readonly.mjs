@@ -19,6 +19,7 @@ const GOOGLE_FILES_TO_CHECK = [
 
 const META_FILES_TO_CHECK = [
   'scripts/sync-meta-ads-detail.mjs',
+  'scripts/check-meta-ads-readiness.mjs',
 ];
 
 const FORBIDDEN_GOOGLE_PATTERNS = [

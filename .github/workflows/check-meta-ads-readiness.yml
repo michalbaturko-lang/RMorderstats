@@ -1,0 +1,65 @@
+name: Check Meta Ads Readiness
+
+on:
+  workflow_dispatch:
+    inputs:
+      markets:
+        description: 'Markets, for example cz or cz,sk,hu,ro'
+        required: false
+        default: ''
+      from_date:
+        description: 'Readiness insight test start date YYYY-MM-DD'
+        required: false
+        default: ''
+      to_date:
+        description: 'Readiness insight test end date YYYY-MM-DD'
+        required: false
+        default: ''
+      days_back:
+        description: 'Rolling window when from/to is empty'
+        required: false
+        default: '7'
+      levels:
+        description: 'Meta levels to test'
+        required: false
+        default: 'campaign,adset,ad,audience,geo,placement'
+      require_secrets:
+        description: 'Fail if Meta secrets are missing'
+        required: false
+        default: '1'
+      require_insight_rows:
+        description: 'Fail if an insight request returns no rows'
+        required: false
+        default: '0'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run verify:ads-readonly
+
+      - name: Check Meta Ads API readiness
+        run: npm run check:meta-ads-readiness
+        env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          META_ADS_ACCOUNTS_JSON: ${{ secrets.META_ADS_ACCOUNTS_JSON }}
+          META_GRAPH_API_VERSION: ${{ vars.META_GRAPH_API_VERSION || 'v24.0' }}
+          META_READINESS_DETAIL_LEVELS: ${{ github.event.inputs.levels || vars.META_READINESS_DETAIL_LEVELS || 'campaign,adset,ad,audience,geo,placement' }}
+          META_READINESS_REQUIRE_SECRETS: ${{ github.event.inputs.require_secrets || '1' }}
+          META_READINESS_REQUIRE_INSIGHT_ROWS: ${{ github.event.inputs.require_insight_rows || vars.META_READINESS_REQUIRE_INSIGHT_ROWS || '0' }}
+          FX_RATES_JSON: ${{ vars.FX_RATES_JSON || '{"CZK":1,"EUR":25.2,"HUF":0.063,"RON":5.1}' }}
+          SYNC_MARKETS: ${{ github.event.inputs.markets || vars.SYNC_MARKETS || '' }}
+          SYNC_FROM_DATE: ${{ github.event.inputs.from_date || '' }}
+          SYNC_TO_DATE: ${{ github.event.inputs.to_date || '' }}
+          SYNC_DAYS_BACK: ${{ github.event.inputs.days_back || '7' }}

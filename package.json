@@ -14,6 +14,7 @@
     "sync:ads-analytics:cz-today": "ADS_SYNC_PROVIDERS=google_ads,meta_ads SYNC_MARKETS=cz SYNC_DAYS_BACK=0 node scripts/sync-ads-analytics.mjs",
     "sync:google-ads-detail": "node scripts/sync-google-ads-detail.mjs",
     "sync:meta-ads-detail": "node scripts/sync-meta-ads-detail.mjs",
+    "check:meta-ads-readiness": "node scripts/check-meta-ads-readiness.mjs",
     "sync:ads-costs:all": "SYNC_MARKETS=cz,sk,hu,ro node scripts/sync-google-ads-costs.mjs",
     "sync:ads-costs:ro-backfill": "SYNC_FROM_DATE=2026-03-01 SYNC_MARKETS=ro node scripts/sync-google-ads-costs.mjs",
     "check:ads-coverage": "node scripts/check-ads-coverage.mjs",

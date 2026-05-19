@@ -134,6 +134,7 @@ npm run sync:ads-analytics:google
 Meta only:
 
 ```bash
+npm run check:meta-ads-readiness
 npm run sync:ads-analytics:meta
 ```
 
@@ -159,6 +160,14 @@ Workflows:
   - deep detail levels
   - refreshes the last 3 days by default
   - intended for campaign diagnostics and analytical history
+- `.github/workflows/check-meta-ads-readiness.yml`
+  - manual read-only Meta API preflight before the first import
+  - validates `META_ACCESS_TOKEN`, `META_ADS_ACCOUNTS_JSON`, account metadata,
+    account currencies and tiny Insights requests for
+    `campaign,adset,ad,audience,geo,placement`
+  - run once with `require_secrets=0` while Meta secrets are missing, then with
+    `require_secrets=1` after secrets are added; only after this passes should
+    a Meta sync/backfill be started
 - `.github/workflows/check-ads-coverage.yml`
   - manual read-only audit
   - checks which Ads campaign rows are already in Supabase for a date range
