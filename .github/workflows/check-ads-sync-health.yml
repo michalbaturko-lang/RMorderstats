@@ -1,0 +1,58 @@
+name: Check Ads Sync Health
+
+on:
+  schedule:
+    - cron: '10,40 * * * *'
+  workflow_dispatch:
+    inputs:
+      providers:
+        description: 'Expected providers. Keep google_ads until Meta secrets are connected.'
+        required: false
+        default: 'google_ads'
+      markets:
+        description: 'Expected markets, for example cz,sk,hu,ro'
+        required: false
+        default: 'cz,sk,hu,ro'
+      health_date:
+        description: 'Optional monitored date YYYY-MM-DD. Defaults to today UTC, or yesterday before the early UTC fallback hour.'
+        required: false
+        default: ''
+      max_sync_age_minutes:
+        description: 'Maximum allowed age of latest campaign sync'
+        required: false
+        default: '75'
+      require_market_rows:
+        description: 'Fail if any expected provider/market has no campaign rows for the monitored date'
+        required: false
+        default: '1'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run verify:ads-readonly
+
+      - name: Check Ads sync health
+        run: npm run check:ads-sync-health
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ADS_HEALTH_EXPECTED_PROVIDERS: ${{ github.event.inputs.providers || vars.ADS_HEALTH_EXPECTED_PROVIDERS || 'google_ads' }}
+          ADS_HEALTH_EXPECTED_MARKETS: ${{ github.event.inputs.markets || vars.ADS_HEALTH_EXPECTED_MARKETS || 'cz,sk,hu,ro' }}
+          ADS_HEALTH_DATE: ${{ github.event.inputs.health_date || '' }}
+          ADS_HEALTH_MAX_SYNC_AGE_MINUTES: ${{ github.event.inputs.max_sync_age_minutes || vars.ADS_HEALTH_MAX_SYNC_AGE_MINUTES || '75' }}
+          ADS_HEALTH_REQUIRE_MARKET_ROWS: ${{ github.event.inputs.require_market_rows || vars.ADS_HEALTH_REQUIRE_MARKET_ROWS || '1' }}
+          ADS_HEALTH_REQUIRE_CURRENT_ROWS: ${{ vars.ADS_HEALTH_REQUIRE_CURRENT_ROWS || '1' }}
+          ADS_HEALTH_REQUIRE_ROWS_UPSERTED: ${{ vars.ADS_HEALTH_REQUIRE_ROWS_UPSERTED || '1' }}
+          ADS_HEALTH_EARLY_UTC_FALLBACK_HOUR: ${{ vars.ADS_HEALTH_EARLY_UTC_FALLBACK_HOUR || '4' }}

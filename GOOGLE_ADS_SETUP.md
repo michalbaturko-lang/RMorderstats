@@ -175,6 +175,15 @@ Workflows:
   - run once with `require_views=0` before the SQL is applied if you only want
     a missing-view readiness check, then with `require_views=1` after applying
     the SQL to prove the views match the dashboard/audit calculations
+- `.github/workflows/check-ads-sync-health.yml`
+  - every 30 minutes, offset from the 15-minute spend sync
+  - read-only health monitor for sync freshness and today's campaign rows
+  - before `04:00 UTC`, monitors yesterday by default to avoid false alarms
+    while same-day Ads rows are still warming up
+  - defaults to `google_ads` and markets `cz,sk,hu,ro`; add `meta_ads` to
+    `ADS_HEALTH_EXPECTED_PROVIDERS` after Meta secrets and first backfill exist
+  - fails if the latest campaign sync is stale, failed, outside the monitored
+    date, upserted no rows, or an expected provider/market has no campaign rows
 
 Current Google Ads detail levels:
 
