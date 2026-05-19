@@ -193,6 +193,17 @@ Workflows:
     `ADS_HEALTH_EXPECTED_PROVIDERS` after Meta secrets and first backfill exist
   - fails if the latest campaign sync is stale, failed, outside the monitored
     date, upserted no rows, or an expected provider/market has no campaign rows
+- `.github/workflows/check-ads-detail-health.yml`
+  - daily after the deep detail sync
+  - read-only health monitor for the diagnostic layers used by the Ads tab
+  - defaults to yesterday UTC, provider `google_ads` and markets `cz,sk,hu,ro`
+  - fails if the latest deep detail sync is stale/missing or if any expected
+    market has no rows for required levels such as `device`, `hour`,
+    `ad_group`, `ad`, `keyword`, `search_term`, `shopping_product` and
+    `conversion_action`
+  - keep provider default as `google_ads`; add `meta_ads` only after Meta
+    secrets, first Meta detail backfill and provider-specific level settings
+    exist
 
 Current Google Ads detail levels:
 
@@ -242,6 +253,9 @@ For Meta Ads:
 - country split
 - publisher/platform/placement split
 
-In `orders.regalmaster.cz`, the next UI step should compare platform metrics
-with real Supabase orders by date and market: spend, real revenue, gross profit,
-gross profit after ad spend, platform ROAS and real ROAS.
+In `orders.regalmaster.cz`, tab `📣 Reklamy` reads the selected date/country
+filter and shows spend, platform metrics, real Supabase revenue, gross profit,
+gross profit after ad spend, PNO, platform ROAS, real ROAS, data readiness and
+senior PPC interpretation cards. When `supabase/ad_business_analytics_views.sql`
+is applied, the tab uses the Supabase business views for order/ad joins; until
+then it falls back to the already loaded dashboard orders.

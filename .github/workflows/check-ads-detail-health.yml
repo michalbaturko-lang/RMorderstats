@@ -1,0 +1,57 @@
+name: Check Ads Detail Health
+
+on:
+  schedule:
+    - cron: '55 3 * * *'
+  workflow_dispatch:
+    inputs:
+      providers:
+        description: 'Expected providers. Keep google_ads until Meta detail history exists.'
+        required: false
+        default: 'google_ads'
+      markets:
+        description: 'Expected markets, for example cz,sk,hu,ro'
+        required: false
+        default: 'cz,sk,hu,ro'
+      health_date:
+        description: 'Optional monitored date YYYY-MM-DD. Defaults to yesterday UTC.'
+        required: false
+        default: ''
+      max_sync_age_minutes:
+        description: 'Maximum allowed age of latest deep detail sync'
+        required: false
+        default: '2160'
+      require_level_rows:
+        description: 'Fail if any required detail level has no rows for any expected market'
+        required: false
+        default: '1'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run verify:ads-readonly
+
+      - name: Check Ads detail health
+        run: npm run check:ads-detail-health
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ADS_DETAIL_HEALTH_EXPECTED_PROVIDERS: ${{ github.event.inputs.providers || vars.ADS_DETAIL_HEALTH_EXPECTED_PROVIDERS || 'google_ads' }}
+          ADS_DETAIL_HEALTH_EXPECTED_MARKETS: ${{ github.event.inputs.markets || vars.ADS_DETAIL_HEALTH_EXPECTED_MARKETS || 'cz,sk,hu,ro' }}
+          ADS_DETAIL_HEALTH_DATE: ${{ github.event.inputs.health_date || '' }}
+          ADS_DETAIL_HEALTH_MAX_SYNC_AGE_MINUTES: ${{ github.event.inputs.max_sync_age_minutes || vars.ADS_DETAIL_HEALTH_MAX_SYNC_AGE_MINUTES || '2160' }}
+          ADS_DETAIL_HEALTH_REQUIRE_LEVEL_ROWS: ${{ github.event.inputs.require_level_rows || vars.ADS_DETAIL_HEALTH_REQUIRE_LEVEL_ROWS || '1' }}
+          ADS_DETAIL_HEALTH_REQUIRED_SYNC_LEVELS: ${{ vars.ADS_DETAIL_HEALTH_REQUIRED_SYNC_LEVELS || 'campaign,device,hour,ad_group,ad,keyword,search_term,shopping_product,conversion_action' }}
+          ADS_DETAIL_HEALTH_REQUIRED_ROW_LEVELS: ${{ vars.ADS_DETAIL_HEALTH_REQUIRED_ROW_LEVELS || 'device,hour,ad_group,ad,keyword,search_term,shopping_product,conversion_action' }}
