@@ -94,6 +94,11 @@ Optional:
 - `META_GRAPH_API_VERSION` default `v24.0`
 - `META_ADS_DETAIL_LEVELS` default `campaign,adset,ad,audience,geo,placement`
 - `FX_RATES_JSON` default `{"CZK":1,"EUR":25.2,"HUF":0.063,"RON":5.1}`
+- `SUPABASE_DB_URL` GitHub secret for the manual
+  `Apply Ads Business Views` workflow. Use the Supabase Postgres connection
+  string; this is intentionally separate from `SUPABASE_SERVICE_ROLE_KEY`
+  because creating/replacing views requires a database connection, not
+  PostgREST.
 
 Recommended `GOOGLE_ADS_ACCOUNTS_JSON`:
 
@@ -184,6 +189,12 @@ Workflows:
   - run once with `require_views=0` before the SQL is applied if you only want
     a missing-view readiness check, then with `require_views=1` after applying
     the SQL to prove the views match the dashboard/audit calculations
+- `.github/workflows/apply-ads-business-views.yml`
+  - manual workflow for applying `supabase/ad_business_analytics_views.sql`
+  - requires `confirm=APPLY_BUSINESS_VIEWS` and a `SUPABASE_DB_URL` secret
+  - runs `verify:ads-readonly` and `verify:supabase-sql-safe` before applying
+  - applies only the allowlisted business-view SQL, then runs
+    `check:ads-business-views` with `ADS_BUSINESS_VIEWS_REQUIRE=1`
 - `.github/workflows/check-ads-sync-health.yml`
   - every 30 minutes, offset from the 15-minute spend sync
   - read-only health monitor for sync freshness and today's campaign rows

@@ -1,0 +1,82 @@
+name: Apply Ads Business Views
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type APPLY_BUSINESS_VIEWS to apply supabase/ad_business_analytics_views.sql'
+        required: true
+        default: ''
+      from_date:
+        description: 'Verification range start YYYY-MM-DD'
+        required: false
+        default: ''
+      to_date:
+        description: 'Verification range end YYYY-MM-DD'
+        required: false
+        default: ''
+      providers:
+        description: 'Verification providers'
+        required: false
+        default: 'google_ads,meta_ads'
+      markets:
+        description: 'Verification markets'
+        required: false
+        default: 'cz,sk,hu,ro'
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run verify:ads-readonly
+
+      - run: npm run verify:supabase-sql-safe
+
+      - name: Require explicit confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "APPLY_BUSINESS_VIEWS" ]; then
+            echo "Refusing to apply SQL. Re-run with confirm=APPLY_BUSINESS_VIEWS."
+            exit 1
+          fi
+
+      - name: Require database connection secret
+        run: |
+          if [ -z "${SUPABASE_DB_URL}" ]; then
+            echo "Missing SUPABASE_DB_URL secret. Add the Supabase Postgres connection string as a GitHub secret before running this workflow."
+            exit 1
+          fi
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+
+      - name: Install Postgres client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Apply business analytics views
+        run: psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/ad_business_analytics_views.sql
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+
+      - name: Verify business views against source data
+        run: npm run check:ads-business-views
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SYNC_FROM_DATE: ${{ github.event.inputs.from_date || '' }}
+          SYNC_TO_DATE: ${{ github.event.inputs.to_date || '' }}
+          SYNC_MARKETS: ${{ github.event.inputs.markets || 'cz,sk,hu,ro' }}
+          ADS_COVERAGE_PROVIDERS: ${{ github.event.inputs.providers || 'google_ads,meta_ads' }}
+          ADS_BUSINESS_VIEWS_REQUIRE: '1'
+          FX_RATES_JSON: ${{ vars.FX_RATES_JSON || '{"CZK":1,"EUR":25.2,"HUF":0.063,"RON":5.1}' }}
