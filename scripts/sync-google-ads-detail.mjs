@@ -447,7 +447,6 @@ function geoQuery(from, to) {
   return [
     'SELECT',
     '  segments.date,',
-    '  segments.geo_target_country,',
     '  segments.geo_target_region,',
     '  segments.geo_target_city,',
     '  segments.geo_target_most_specific_location,',
@@ -699,7 +698,6 @@ function dimensionsForLevel(level, row) {
     return {
       country_criterion_id: row.userLocationView?.countryCriterionId ? String(row.userLocationView.countryCriterionId) : null,
       targeting_location: row.userLocationView?.targetingLocation ?? null,
-      geo_target_country: row.segments?.geoTargetCountry || null,
       geo_target_region: row.segments?.geoTargetRegion || null,
       geo_target_city: row.segments?.geoTargetCity || null,
       geo_target_most_specific_location: row.segments?.geoTargetMostSpecificLocation || null,
