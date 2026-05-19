@@ -1805,7 +1805,7 @@ export default function App() {
           )}
 
           {tab === 'ads' && (
-            <AdsModule supabaseClient={supabase} dateFrom={dateFrom} dateTo={dateTo} country={country} />
+            <AdsModule supabaseClient={supabase} dateFrom={dateFrom} dateTo={dateTo} country={country} orders={filtered} />
           )}
 
           {tab === 'b2b' && (

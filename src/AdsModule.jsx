@@ -24,6 +24,8 @@ const MARKET_LABELS = {
   unknown: 'Neznámé',
 };
 
+const CURRENCY_RATES = { CZK: 1, EUR: 25.2, HUF: 0.063, RON: 5.1 };
+
 const LEVEL_LABELS = {
   ad_group: 'Ad groups',
   ad: 'Ads',
@@ -58,6 +60,16 @@ const emptyMetrics = () => ({
   conversionValue: 0,
 });
 
+const emptyOrderMetrics = () => ({
+  orders: 0,
+  exactOrders: 0,
+  revenue: 0,
+  exactRevenue: 0,
+  exactCost: 0,
+  exactGrossProfit: 0,
+  missingCostOrders: 0,
+});
+
 const addMetrics = (target, row) => {
   target.spend += toNumber(row.spend_czk);
   target.impressions += toNumber(row.impressions);
@@ -76,6 +88,72 @@ const enrichMetrics = (metrics) => ({
   aov: metrics.conversions ? metrics.conversionValue / metrics.conversions : 0,
   costPerConversion: metrics.conversions ? metrics.spend / metrics.conversions : 0,
 });
+
+const getOrderCurrency = (order) => order.currency || order.raw_data?.currency_id || 'CZK';
+const getOrderMarket = (order) => (order.market || order.raw_data?.language_id || 'unknown').toLowerCase();
+const getOrderDateKey = (order) => String(order.order_date || order.created_at || '').slice(0, 10);
+
+function addOrderMetrics(target, order) {
+  const products = Array.isArray(order.raw_data?.products) ? order.raw_data.products : [];
+  const rate = CURRENCY_RATES[getOrderCurrency(order)] || 1;
+  let revenue = 0;
+  let cost = 0;
+  let missingItems = 0;
+
+  for (const product of products) {
+    const quantity = Math.max(toNumber(product.quantity), 1);
+    const buyPrice = toNumber(product.buy_price);
+    revenue += toNumber(product.price_without_vat);
+    if (buyPrice > 0) {
+      cost += buyPrice * quantity;
+    } else {
+      missingItems += 1;
+    }
+  }
+
+  const revenueCzk = revenue * rate;
+  const costCzk = cost * rate;
+
+  target.orders += 1;
+  target.revenue += revenueCzk;
+
+  if (products.length && revenueCzk > 0 && missingItems === 0) {
+    target.exactOrders += 1;
+    target.exactRevenue += revenueCzk;
+    target.exactCost += costCzk;
+    target.exactGrossProfit += revenueCzk - costCzk;
+  } else if (products.length) {
+    target.missingCostOrders += 1;
+  }
+}
+
+function aggregateOrders(orders) {
+  return orders.reduce((acc, order) => {
+    addOrderMetrics(acc, order);
+    return acc;
+  }, emptyOrderMetrics());
+}
+
+function aggregateOrdersByDate(orders) {
+  const byDate = new Map();
+  for (const order of orders) {
+    const date = getOrderDateKey(order);
+    if (!date) continue;
+    if (!byDate.has(date)) byDate.set(date, { date, ...emptyOrderMetrics() });
+    addOrderMetrics(byDate.get(date), order);
+  }
+  return byDate;
+}
+
+function aggregateOrdersByMarket(orders) {
+  const byMarket = new Map();
+  for (const order of orders) {
+    const market = getOrderMarket(order);
+    if (!byMarket.has(market)) byMarket.set(market, { market, ...emptyOrderMetrics() });
+    addOrderMetrics(byMarket.get(market), order);
+  }
+  return byMarket;
+}
 
 const metricSummary = (rows) => enrichMetrics(rows.reduce((acc, row) => {
   addMetrics(acc, row);
@@ -117,7 +195,7 @@ function aggregateCampaigns(rows, campaignMeta) {
     .sort((a, b) => b.spend - a.spend);
 }
 
-function aggregateDaily(rows) {
+function aggregateDaily(rows, orderByDate) {
   const byDate = new Map();
   for (const row of rows) {
     if (!byDate.has(row.date)) {
@@ -127,11 +205,21 @@ function aggregateDaily(rows) {
   }
 
   return Array.from(byDate.values())
-    .map(enrichMetrics)
+    .map((row) => {
+      const enriched = enrichMetrics(row);
+      const orders = orderByDate.get(row.date) || emptyOrderMetrics();
+      return {
+        ...enriched,
+        realRevenue: orders.revenue,
+        exactGrossProfit: orders.exactGrossProfit,
+        grossProfitAfterAds: orders.exactGrossProfit - enriched.spend,
+        realRoas: enriched.spend ? orders.revenue / enriched.spend : 0,
+      };
+    })
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
 }
 
-function aggregateMarkets(rows) {
+function aggregateMarkets(rows, orderByMarket) {
   const byKey = new Map();
   for (const row of rows) {
     const key = `${row.provider}:${row.market}`;
@@ -142,7 +230,18 @@ function aggregateMarkets(rows) {
   }
 
   return Array.from(byKey.values())
-    .map(enrichMetrics)
+    .map((row) => {
+      const enriched = enrichMetrics(row);
+      const orders = orderByMarket.get(row.market) || emptyOrderMetrics();
+      return {
+        ...enriched,
+        realRevenue: orders.revenue,
+        exactGrossProfit: orders.exactGrossProfit,
+        grossProfitAfterAds: orders.exactGrossProfit - enriched.spend,
+        realRoas: enriched.spend ? orders.revenue / enriched.spend : 0,
+        pno: orders.revenue ? (enriched.spend / orders.revenue) * 100 : 0,
+      };
+    })
     .sort((a, b) => b.spend - a.spend);
 }
 
@@ -359,7 +458,7 @@ function AdsTooltip({ active, payload }) {
   );
 }
 
-export default function AdsModule({ supabaseClient, dateFrom, dateTo, country }) {
+export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, orders = [] }) {
   const [dailyRows, setDailyRows] = useState([]);
   const [campaignRows, setCampaignRows] = useState([]);
   const [campaignMetaRows, setCampaignMetaRows] = useState([]);
@@ -453,9 +552,20 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country })
     return map;
   }, [campaignMetaRows]);
 
+  const orderTotal = useMemo(() => aggregateOrders(orders), [orders]);
+  const orderByDate = useMemo(() => aggregateOrdersByDate(orders), [orders]);
+  const orderByMarket = useMemo(() => aggregateOrdersByMarket(orders), [orders]);
   const total = useMemo(() => metricSummary(dailyRows), [dailyRows]);
-  const daily = useMemo(() => aggregateDaily(dailyRows), [dailyRows]);
-  const markets = useMemo(() => aggregateMarkets(dailyRows), [dailyRows]);
+  const businessTotal = useMemo(() => ({
+    realRevenue: orderTotal.revenue,
+    exactGrossProfit: orderTotal.exactGrossProfit,
+    grossProfitAfterAds: orderTotal.exactGrossProfit - total.spend,
+    realRoas: total.spend ? orderTotal.revenue / total.spend : 0,
+    pno: orderTotal.revenue ? (total.spend / orderTotal.revenue) * 100 : 0,
+    spendToGrossProfit: orderTotal.exactGrossProfit ? (total.spend / orderTotal.exactGrossProfit) * 100 : 0,
+  }), [orderTotal, total]);
+  const daily = useMemo(() => aggregateDaily(dailyRows, orderByDate), [dailyRows, orderByDate]);
+  const markets = useMemo(() => aggregateMarkets(dailyRows, orderByMarket), [dailyRows, orderByMarket]);
   const campaigns = useMemo(() => aggregateCampaigns(campaignRows, campaignMeta), [campaignRows, campaignMeta]);
   const topAdGroups = useMemo(() => aggregateDetails(detailRows, 'ad_group'), [detailRows]);
   const topAds = useMemo(() => aggregateDetails(detailRows, 'ad'), [detailRows]);
@@ -503,6 +613,15 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country })
         <Kpi label="Imprese" value={formatNumber(total.impressions)} sub={`${formatNumber(total.interactions)} interakcí`} />
       </div>
 
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+        <Kpi label="Real tržby" value={formatCurrency(businessTotal.realRevenue)} sub={`${formatNumber(orderTotal.orders)} obj.`} tone="blue" />
+        <Kpi label="Přesný hrubý zisk" value={formatCurrency(businessTotal.exactGrossProfit)} sub={`${formatNumber(orderTotal.exactOrders)} přesných obj.`} tone="emerald" />
+        <Kpi label="Zisk po Ads" value={formatCurrency(businessTotal.grossProfitAfterAds)} sub="hrubý zisk - spend" tone={businessTotal.grossProfitAfterAds >= 0 ? 'emerald' : 'amber'} />
+        <Kpi label="Real ROAS" value={formatRatio(businessTotal.realRoas)} sub="tržby / spend" tone="blue" />
+        <Kpi label="PNO" value={formatPercent(businessTotal.pno)} sub="spend / tržby" />
+        <Kpi label="Ads vs zisk" value={formatPercent(businessTotal.spendToGrossProfit)} sub={`${formatNumber(orderTotal.missingCostOrders)} obj. bez přesné nákupky`} />
+      </div>
+
       <div className="rounded-lg border border-slate-200 p-3">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-slate-800">Denní vývoj</h3>
@@ -519,6 +638,8 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country })
               <Legend wrapperStyle={{ fontSize: '12px' }} />
               <Bar yAxisId="money" dataKey="spend" name="Spend" fill="#f59e0b" radius={[5, 5, 0, 0]} />
               <Bar yAxisId="money" dataKey="conversionValue" name="Konv. hodnota" fill="#10b981" radius={[5, 5, 0, 0]} />
+              <Line yAxisId="money" type="monotone" dataKey="realRevenue" name="Real tržby" stroke="#0f766e" strokeWidth={2.2} dot={false} activeDot={{ r: 4 }} />
+              <Line yAxisId="money" type="monotone" dataKey="grossProfitAfterAds" name="Zisk po Ads" stroke="#7c3aed" strokeWidth={2.2} dot={false} activeDot={{ r: 4 }} />
               <Line yAxisId="roas" type="monotone" dataKey="roas" name="ROAS" stroke="#2563eb" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
             </ComposedChart>
           </ResponsiveContainer>
@@ -535,6 +656,9 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country })
                 <th className="px-3 py-2 text-right">Spend</th>
                 <th className="px-3 py-2 text-right">Konv. hodnota</th>
                 <th className="px-3 py-2 text-right">ROAS</th>
+                <th className="px-3 py-2 text-right">Real tržby</th>
+                <th className="px-3 py-2 text-right">Zisk po Ads</th>
+                <th className="px-3 py-2 text-right">PNO</th>
                 <th className="px-3 py-2 text-right">Konverze</th>
                 <th className="px-3 py-2 text-right">AOV</th>
                 <th className="px-3 py-2 text-right">CPC</th>
@@ -547,6 +671,9 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country })
                   <td className="px-3 py-2 text-right text-red-700 font-semibold">{formatCurrency(row.spend)}</td>
                   <td className="px-3 py-2 text-right text-emerald-700 font-semibold">{formatCurrency(row.conversionValue)}</td>
                   <td className="px-3 py-2 text-right font-bold text-slate-800">{formatRatio(row.roas)}</td>
+                  <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.realRevenue)}</td>
+                  <td className={`px-3 py-2 text-right font-semibold ${row.grossProfitAfterAds >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatCurrency(row.grossProfitAfterAds)}</td>
+                  <td className="px-3 py-2 text-right text-slate-700">{formatPercent(row.pno)}</td>
                   <td className="px-3 py-2 text-right text-slate-700">{formatNumber(row.conversions)}</td>
                   <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.aov)}</td>
                   <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.cpc)}</td>
@@ -554,7 +681,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country })
               ))}
               {!markets.length && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-4 text-center text-slate-500">Pro zvolené období nejsou Ads data.</td>
+                  <td colSpan={10} className="px-3 py-4 text-center text-slate-500">Pro zvolené období nejsou Ads data.</td>
                 </tr>
               )}
             </tbody>
