@@ -10,8 +10,11 @@ read-only platform data into Supabase; it does not edit campaigns, bids, budgets
 ads, products, or audiences.
 
 Read-only rule: Google Ads scripts may call only reporting/search endpoints
-(`googleAds:searchStream`). They must not call any Google Ads mutate endpoint.
-Both Ads workflows run `npm run verify:ads-readonly` before syncing.
+(`googleAds:searchStream`). Meta Ads scripts may call the Graph API only via
+GET-based account metadata and insights reads. They must not call any mutate,
+POST, PATCH, PUT or DELETE endpoint for campaigns, budgets, ads, ad sets,
+creatives, products or audiences. Both Ads workflows run
+`npm run verify:ads-readonly` before syncing.
 
 ## 1) Required Access
 

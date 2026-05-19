@@ -1244,7 +1244,7 @@ export default function App() {
             { id: 'tempo', l: '⏱ Tempo dne' },
             { id: 'geo', l: '📍 Geografie' },
             { id: 'b2b', l: '🏢 B2B / B2C' },
-            { id: 'ads', l: '📣 Ads' },
+            { id: 'ads', l: '📣 Reklamy' },
             ...(FINANCE_ALLOWED_EMAILS.includes(user?.email || '') ? [{ id: 'finance', l: '💰 Finance' }] : [])
           ].map(t => (
             <button 
