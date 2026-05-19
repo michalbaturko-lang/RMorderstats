@@ -36,7 +36,7 @@ const LEVEL_LABELS = {
   hour: 'Hodiny',
   conversion_action: 'Konverzní akce',
   audience: 'Meta audience',
-  geo: 'Meta geo',
+  geo: 'Geo',
   placement: 'Meta placement',
 };
 
@@ -405,6 +405,11 @@ function aggregateDetails(rows, level) {
       dimensions.age,
       dimensions.gender,
       dimensions.country,
+      dimensions.geo_target_most_specific_location,
+      dimensions.geo_target_city,
+      dimensions.geo_target_region,
+      dimensions.geo_target_country,
+      dimensions.country_criterion_id,
       dimensions.ad_id,
       dimensions.ad_group_id,
       dimensions.asset_group_id,
@@ -426,7 +431,13 @@ function aggregateDetails(rows, level) {
               : level === 'audience'
                 ? [dimensions.age, dimensions.gender].filter(Boolean).join(' / ') || '(bez audience)'
                 : level === 'geo'
-                  ? dimensions.country || '(bez země)'
+                  ? dimensions.geo_target_most_specific_location
+                    || dimensions.geo_target_city
+                    || dimensions.geo_target_region
+                    || dimensions.geo_target_country
+                    || dimensions.country
+                    || dimensions.country_criterion_id
+                    || '(bez geo)'
                   : level === 'placement'
                     ? [dimensions.publisher_platform, dimensions.platform_position, dimensions.impression_device].filter(Boolean).join(' / ') || '(bez placementu)'
               : level === 'ad'
@@ -450,7 +461,7 @@ function aggregateDetails(rows, level) {
               : level === 'ad_group'
                 ? dimensions.ad_group_type || dimensions.ad_group_status
                 : level === 'geo'
-                  ? dimensions.country
+                  ? dimensions.location_type || dimensions.country || dimensions.geo_target_country
                   : level === 'placement'
                     ? dimensions.publisher_platform
                     : null;
@@ -844,7 +855,7 @@ function buildPpcInsights({
   if (strongGeo) {
     insights.push(insight({
       severity: 'info',
-      title: 'Meta geo signál',
+      title: 'Geo signál',
       finding: 'V geo rozpadu je segment s nadprůměrnou návratností.',
       evidence: `${strongGeo.label}: ROAS ${formatRatio(strongGeo.roas)}, konv. hodnota ${formatCurrency(strongGeo.conversionValue)}, spend ${formatCurrency(strongGeo.spend)}.`,
       recommendation: 'Sledovat, jestli se geo signál opakuje i v real tržbách a marži. Pak dává smysl řešit rozpočtovou prioritu daného trhu/segmentu.',

@@ -71,7 +71,7 @@ jobs:
           GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${{ secrets.GOOGLE_ADS_LOGIN_CUSTOMER_ID }}
           GOOGLE_ADS_ACCOUNTS_JSON: ${{ secrets.GOOGLE_ADS_ACCOUNTS_JSON }}
           GOOGLE_ADS_API_VERSION: ${{ vars.GOOGLE_ADS_API_VERSION || 'v23' }}
-          GOOGLE_ADS_DETAIL_LEVELS: ${{ vars.GOOGLE_ADS_DETAIL_LEVELS || 'campaign,device,hour,ad_group,ad,keyword,search_term,shopping_product,asset_group,conversion_action' }}
+          GOOGLE_ADS_DETAIL_LEVELS: ${{ vars.GOOGLE_ADS_DETAIL_LEVELS || 'campaign,device,hour,ad_group,ad,keyword,search_term,shopping_product,asset_group,geo,conversion_action' }}
 
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
           META_ADS_ACCOUNTS_JSON: ${{ secrets.META_ADS_ACCOUNTS_JSON }}

@@ -26,6 +26,7 @@ const DEFAULT_SYNC_LEVELS = [
   'keyword',
   'search_term',
   'shopping_product',
+  'geo',
   'conversion_action',
 ];
 const DEFAULT_ROW_LEVELS = [
@@ -36,6 +37,7 @@ const DEFAULT_ROW_LEVELS = [
   'keyword',
   'search_term',
   'shopping_product',
+  'geo',
   'conversion_action',
 ];
 

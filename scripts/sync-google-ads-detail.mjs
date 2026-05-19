@@ -14,7 +14,7 @@
  * - GOOGLE_ADS_BASE44_APP_ID / GOOGLE_ADS_BASE44_ACCESS_TOKEN / GOOGLE_ADS_BASE44_TOKEN_ACCOUNT_ID
  * - GOOGLE_ADS_LOGIN_CUSTOMER_ID
  * - GOOGLE_ADS_API_VERSION (default: v23)
- * - GOOGLE_ADS_DETAIL_LEVELS (default: campaign,device,hour,ad_group,ad,keyword,search_term,shopping_product,asset_group,conversion_action)
+ * - GOOGLE_ADS_DETAIL_LEVELS (default: campaign,device,hour,ad_group,ad,keyword,search_term,shopping_product,asset_group,geo,conversion_action)
  * - SYNC_DAYS_BACK / SYNC_FROM_DATE / SYNC_TO_DATE / SYNC_MARKETS
  * - FX_RATES_JSON
  */
@@ -60,6 +60,7 @@ const DEFAULT_LEVELS = [
   'search_term',
   'shopping_product',
   'asset_group',
+  'geo',
   'conversion_action',
 ];
 
@@ -442,6 +443,38 @@ function assetGroupQuery(from, to) {
   ].join('\n');
 }
 
+function geoQuery(from, to) {
+  return [
+    'SELECT',
+    '  segments.date,',
+    '  segments.geo_target_country,',
+    '  segments.geo_target_region,',
+    '  segments.geo_target_city,',
+    '  segments.geo_target_most_specific_location,',
+    '  customer.id,',
+    '  customer.descriptive_name,',
+    '  customer.currency_code,',
+    '  campaign.id,',
+    '  campaign.name,',
+    '  geographic_view.country_criterion_id,',
+    '  geographic_view.location_type,',
+    '  metrics.cost_micros,',
+    '  metrics.impressions,',
+    '  metrics.clicks,',
+    '  metrics.interactions,',
+    '  metrics.ctr,',
+    '  metrics.average_cpc,',
+    '  metrics.average_cpm,',
+    '  metrics.conversions,',
+    '  metrics.conversions_value,',
+    '  metrics.all_conversions,',
+    '  metrics.all_conversions_value',
+    'FROM geographic_view',
+    `WHERE segments.date BETWEEN '${from}' AND '${to}'`,
+    'ORDER BY segments.date, campaign.id, metrics.cost_micros DESC',
+  ].join('\n');
+}
+
 function conversionActionQuery(from, to) {
   return [
     'SELECT',
@@ -473,6 +506,7 @@ const LEVEL_QUERIES = {
   search_term: { required: false, buildQuery: searchTermQuery },
   shopping_product: { required: false, buildQuery: shoppingProductQuery },
   asset_group: { required: false, buildQuery: assetGroupQuery },
+  geo: { required: false, buildQuery: geoQuery },
   conversion_action: { required: false, buildQuery: conversionActionQuery },
 };
 
@@ -659,6 +693,16 @@ function dimensionsForLevel(level, row) {
       asset_group_id: row.assetGroup?.id ? String(row.assetGroup.id) : null,
       asset_group_name: row.assetGroup?.name || null,
       asset_group_status: row.assetGroup?.status || null,
+    };
+  }
+  if (level === 'geo') {
+    return {
+      country_criterion_id: row.geographicView?.countryCriterionId ? String(row.geographicView.countryCriterionId) : null,
+      location_type: row.geographicView?.locationType || null,
+      geo_target_country: row.segments?.geoTargetCountry || null,
+      geo_target_region: row.segments?.geoTargetRegion || null,
+      geo_target_city: row.segments?.geoTargetCity || null,
+      geo_target_most_specific_location: row.segments?.geoTargetMostSpecificLocation || null,
     };
   }
   if (level === 'conversion_action') {

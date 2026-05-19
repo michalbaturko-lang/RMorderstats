@@ -90,7 +90,7 @@ Optional:
 
 - `ADS_SYNC_PROVIDERS` default `google_ads,meta_ads`
 - `GOOGLE_ADS_API_VERSION` default `v23`
-- `GOOGLE_ADS_DETAIL_LEVELS` default `campaign,device,hour,ad_group,ad,keyword,search_term,shopping_product,asset_group,conversion_action`
+- `GOOGLE_ADS_DETAIL_LEVELS` default `campaign,device,hour,ad_group,ad,keyword,search_term,shopping_product,asset_group,geo,conversion_action`
 - `META_GRAPH_API_VERSION` default `v24.0`
 - `META_ADS_DETAIL_LEVELS` default `campaign,adset,ad,audience,geo,placement`
 - `FX_RATES_JSON` default `{"CZK":1,"EUR":25.2,"HUF":0.063,"RON":5.1}`
@@ -227,6 +227,7 @@ Current Google Ads detail levels:
 - `search_term`
 - `shopping_product`
 - `asset_group`
+- `geo`
 - `conversion_action`
 
 Quota discipline:
