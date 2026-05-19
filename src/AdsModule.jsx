@@ -484,6 +484,7 @@ function buildPpcInsights({
   topGeo,
   topPlacements,
   daily,
+  providerCoverage,
 }) {
   const insights = [];
   const minSpend = Math.max(total.spend * 0.03, 250);
@@ -501,6 +502,39 @@ function buildPpcInsights({
         confidence: 'vysoká',
       }),
     ];
+  }
+
+  const partialMarketCoverage = markets
+    .filter((row) => row.spend > 0 && row.expectedDays > 1 && row.coveragePct > 0 && row.coveragePct < 95)
+    .sort((a, b) => a.coveragePct - b.coveragePct || b.spend - a.spend);
+  if (partialMarketCoverage.length) {
+    insights.push(insight({
+      severity: 'warning',
+      title: 'Historické Ads pokrytí je částečné',
+      finding: 'Některé země mají ve vybraném období reklamní spend jen pro část dní, takže PNO/ROAS je potřeba číst jako pokrytý výsek, ne jako kompletní historii trhu.',
+      evidence: partialMarketCoverage
+        .slice(0, 3)
+        .map((row) => {
+          const range = row.firstDate && row.lastDate ? `, data ${row.firstDate} až ${row.lastDate}` : '';
+          return `${providerLabel(row.provider)} / ${marketLabel(row.market)}: ${formatNumber(row.days)}/${formatNumber(row.expectedDays)} dnů (${formatPercent(row.coveragePct)}${range})`;
+        })
+        .join('; '),
+      recommendation: 'Pro férové srovnání trendu porovnávat období, kde je Ads pokrytí podobné. U YTD filtrů brát částečné trhy odděleně nebo filtrovat jen období od prvního kompletního syncu.',
+      confidence: 'vysoká',
+    }));
+  }
+
+  const metaCoverage = providerCoverage.find((row) => row.provider === 'meta_ads');
+  const googleCoverage = providerCoverage.find((row) => row.provider === 'google_ads');
+  if (googleCoverage?.hasData && metaCoverage && !metaCoverage.hasData) {
+    insights.push(insight({
+      severity: 'info',
+      title: 'Meta Ads zatím nejsou v datech',
+      finding: 'Aktuální marketingový přehled počítá placená média z Google Ads; Meta Ads ve vybraném filtru zatím nemají campaign řádky.',
+      evidence: `Google Ads: ${formatCurrency(googleCoverage.spend)} spendu a ${formatNumber(googleCoverage.campaignRows)} campaign řádků. Meta Ads: ${formatNumber(metaCoverage.campaignRows)} campaign řádků.`,
+      recommendation: 'Po doplnění Meta přístupu spustit campaign sync a denní detailní sync; teprve potom bude celkové PNO zahrnovat i Facebook/Instagram.',
+      confidence: 'vysoká',
+    }));
   }
 
   if (businessTotal.grossProfitAfterAds < 0) {
@@ -1161,6 +1195,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
     topGeo,
     topPlacements,
     daily,
+    providerCoverage,
   }), [
     total,
     businessTotal,
@@ -1176,6 +1211,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
     topGeo,
     topPlacements,
     daily,
+    providerCoverage,
   ]);
   const latestRun = syncRuns[0];
 
