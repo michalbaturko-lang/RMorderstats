@@ -297,7 +297,6 @@ function assetGroupQuery(from, to) {
     '  metrics.interactions,',
     '  metrics.ctr,',
     '  metrics.average_cpc,',
-    '  metrics.average_cpm,',
     '  metrics.conversions,',
     '  metrics.conversions_value,',
     '  metrics.all_conversions,',
@@ -332,6 +331,7 @@ function buildMetricRow({ row, account, level, dimensions, fxRates, fetchedAt })
   const allConversionValueNative = numberOrNull(row.metrics?.allConversionsValue) ?? 0;
   const conversions = numberOrNull(row.metrics?.conversions) ?? 0;
   const clicks = numberOrNull(row.metrics?.clicks) ?? 0;
+  const impressions = numberOrNull(row.metrics?.impressions) ?? 0;
   const averageCpcNative = microsToNative(row.metrics?.averageCpc);
   const averageCpmNative = microsToNative(row.metrics?.averageCpm);
   const averageOrderValueNative = conversions > 0 ? conversionValueNative / conversions : null;
@@ -364,7 +364,7 @@ function buildMetricRow({ row, account, level, dimensions, fxRates, fetchedAt })
     spend_micros: numberOrNull(row.metrics?.costMicros) ?? 0,
     spend_native: roundMetric(spendNative),
     spend_czk: spendCzk,
-    impressions: numberOrNull(row.metrics?.impressions) ?? 0,
+    impressions,
     clicks,
     interactions: numberOrNull(row.metrics?.interactions),
     conversions,
@@ -378,7 +378,9 @@ function buildMetricRow({ row, account, level, dimensions, fxRates, fetchedAt })
     view_through_conversions: numberOrNull(row.metrics?.viewThroughConversions),
     ctr: roundMetric(row.metrics?.ctr, 8),
     cpc_czk: averageCpcNative === null ? (clicks > 0 ? roundMoney(spendCzk / clicks) : null) : currencyToCzk(averageCpcNative, currency, fxRates),
-    cpm_czk: averageCpmNative === null ? null : currencyToCzk(averageCpmNative, currency, fxRates),
+    cpm_czk: averageCpmNative === null
+      ? (impressions > 0 ? roundMoney((spendCzk / impressions) * 1000) : null)
+      : currencyToCzk(averageCpmNative, currency, fxRates),
     roas_platform: spendCzk > 0 ? roundMetric((currencyToCzk(conversionValueNative, currency, fxRates) || 0) / spendCzk) : null,
     cost_per_conversion_czk: conversions > 0 ? roundMoney(spendCzk / conversions) : null,
     dimension_hash: dimensionHash,
