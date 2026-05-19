@@ -25,9 +25,14 @@ const MARKET_LABELS = {
 };
 
 const LEVEL_LABELS = {
+  ad_group: 'Ad groups',
+  ad: 'Ads',
+  keyword: 'Keywords',
   search_term: 'Search terms',
   shopping_product: 'Shopping produkty',
   asset_group: 'Asset groups',
+  hour: 'Hodiny',
+  conversion_action: 'Konverzní akce',
 };
 
 const toNumber = (value) => {
@@ -147,26 +152,59 @@ function aggregateDetails(rows, level) {
 
   for (const row of levelRows) {
     const dimensions = row.dimensions || {};
-    const keyValue = level === 'search_term'
-      ? dimensions.search_term
-      : level === 'shopping_product'
-        ? `${dimensions.product_item_id || ''}:${dimensions.product_title || ''}`
-        : dimensions.asset_group_id || dimensions.asset_group_name;
+    const keyValue = [
+      dimensions.search_term,
+      dimensions.keyword_text,
+      dimensions.product_item_id,
+      dimensions.product_title,
+      dimensions.ad_id,
+      dimensions.ad_group_id,
+      dimensions.asset_group_id,
+      dimensions.conversion_action,
+      dimensions.hour,
+      dimensions.asset_group_name,
+    ].find((value) => value !== null && value !== undefined && value !== '');
 
     const key = `${row.provider}:${row.market}:${level}:${keyValue || 'unknown'}`;
     if (!byKey.has(key)) {
+      const label = level === 'search_term'
+        ? dimensions.search_term || '(bez search termu)'
+        : level === 'keyword'
+          ? dimensions.keyword_text || '(bez keywordu)'
+          : level === 'shopping_product'
+            ? dimensions.product_title || dimensions.product_item_id || '(bez produktu)'
+            : level === 'asset_group'
+              ? dimensions.asset_group_name || '(bez asset group)'
+              : level === 'ad'
+                ? dimensions.ad_name || dimensions.ad_id || '(bez reklamy)'
+                : level === 'ad_group'
+                  ? dimensions.ad_group_name || dimensions.ad_group_id || '(bez sestavy)'
+                  : level === 'hour'
+                    ? `${String(dimensions.hour ?? '').padStart(2, '0')}:00`
+                    : level === 'conversion_action'
+                      ? dimensions.conversion_action_name || dimensions.conversion_action || '(bez konverzní akce)'
+                      : keyValue || '(bez detailu)';
+
+      const subLabel = level === 'shopping_product'
+        ? dimensions.product_item_id
+        : level === 'keyword'
+          ? dimensions.match_type
+          : level === 'search_term'
+            ? dimensions.match_type
+            : level === 'ad'
+              ? dimensions.ad_type || dimensions.ad_status
+              : level === 'ad_group'
+                ? dimensions.ad_group_type || dimensions.ad_group_status
+                : null;
+
       byKey.set(key, {
         key,
         level,
         provider: row.provider,
         market: row.market,
         campaignName: row.campaign_name,
-        label: level === 'search_term'
-          ? dimensions.search_term || '(bez search termu)'
-          : level === 'shopping_product'
-            ? dimensions.product_title || dimensions.product_item_id || '(bez produktu)'
-            : dimensions.asset_group_name || '(bez asset group)',
-        subLabel: level === 'shopping_product' ? dimensions.product_item_id : dimensions.match_type,
+        label,
+        subLabel,
         ...emptyMetrics(),
       });
     }
@@ -360,7 +398,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country })
           .select('date,provider,market,level,campaign_name,ad_group_name,spend_czk,impressions,clicks,interactions,conversions,conversion_value_czk,dimensions')
           .gte('date', dateFrom)
           .lte('date', dateTo)
-          .in('level', ['search_term', 'shopping_product', 'asset_group'])
+          .in('level', ['hour', 'ad_group', 'ad', 'keyword', 'search_term', 'shopping_product', 'asset_group', 'conversion_action'])
           .order('spend_czk', { ascending: false })
           .range(0, 4999)
       );
@@ -419,9 +457,14 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country })
   const daily = useMemo(() => aggregateDaily(dailyRows), [dailyRows]);
   const markets = useMemo(() => aggregateMarkets(dailyRows), [dailyRows]);
   const campaigns = useMemo(() => aggregateCampaigns(campaignRows, campaignMeta), [campaignRows, campaignMeta]);
+  const topAdGroups = useMemo(() => aggregateDetails(detailRows, 'ad_group'), [detailRows]);
+  const topAds = useMemo(() => aggregateDetails(detailRows, 'ad'), [detailRows]);
+  const topKeywords = useMemo(() => aggregateDetails(detailRows, 'keyword'), [detailRows]);
   const topSearchTerms = useMemo(() => aggregateDetails(detailRows, 'search_term'), [detailRows]);
   const topProducts = useMemo(() => aggregateDetails(detailRows, 'shopping_product'), [detailRows]);
   const topAssetGroups = useMemo(() => aggregateDetails(detailRows, 'asset_group'), [detailRows]);
+  const topHours = useMemo(() => aggregateDetails(detailRows, 'hour'), [detailRows]);
+  const topConversionActions = useMemo(() => aggregateDetails(detailRows, 'conversion_action'), [detailRows]);
   const latestRun = syncRuns[0];
 
   if (loading) {
@@ -525,9 +568,14 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country })
       </div>
 
       <div className="grid gap-5 xl:grid-cols-3">
+        <DetailTable title={LEVEL_LABELS.ad_group} rows={topAdGroups} />
+        <DetailTable title={LEVEL_LABELS.ad} rows={topAds} />
+        <DetailTable title={LEVEL_LABELS.keyword} rows={topKeywords} />
         <DetailTable title={LEVEL_LABELS.search_term} rows={topSearchTerms} />
         <DetailTable title={LEVEL_LABELS.shopping_product} rows={topProducts} />
         <DetailTable title={LEVEL_LABELS.asset_group} rows={topAssetGroups} />
+        <DetailTable title={LEVEL_LABELS.hour} rows={topHours} />
+        <DetailTable title={LEVEL_LABELS.conversion_action} rows={topConversionActions} />
       </div>
 
       {!!syncRuns.length && (

@@ -14,7 +14,7 @@
  * - GOOGLE_ADS_BASE44_APP_ID / GOOGLE_ADS_BASE44_ACCESS_TOKEN / GOOGLE_ADS_BASE44_TOKEN_ACCOUNT_ID
  * - GOOGLE_ADS_LOGIN_CUSTOMER_ID
  * - GOOGLE_ADS_API_VERSION (default: v23)
- * - GOOGLE_ADS_DETAIL_LEVELS (default: campaign,device,search_term,shopping_product,asset_group)
+ * - GOOGLE_ADS_DETAIL_LEVELS (default: campaign,device,hour,ad_group,ad,keyword,search_term,shopping_product,asset_group,conversion_action)
  * - SYNC_DAYS_BACK / SYNC_FROM_DATE / SYNC_TO_DATE / SYNC_MARKETS
  * - FX_RATES_JSON
  */
@@ -50,7 +50,18 @@ const REQUIRED_ENV_VARS = [
   'SUPABASE_SERVICE_ROLE_KEY',
 ];
 
-const DEFAULT_LEVELS = ['campaign', 'device', 'search_term', 'shopping_product', 'asset_group'];
+const DEFAULT_LEVELS = [
+  'campaign',
+  'device',
+  'hour',
+  'ad_group',
+  'ad',
+  'keyword',
+  'search_term',
+  'shopping_product',
+  'asset_group',
+  'conversion_action',
+];
 
 function parseLevels() {
   const raw = process.env.GOOGLE_ADS_DETAIL_LEVELS || DEFAULT_LEVELS.join(',');
@@ -217,6 +228,130 @@ function deviceQuery(from, to) {
   ].join('\n');
 }
 
+function hourQuery(from, to) {
+  return [
+    'SELECT',
+    '  segments.date,',
+    '  segments.hour,',
+    '  customer.id,',
+    '  customer.descriptive_name,',
+    '  customer.currency_code,',
+    '  campaign.id,',
+    '  campaign.name,',
+    '  metrics.cost_micros,',
+    '  metrics.impressions,',
+    '  metrics.clicks,',
+    '  metrics.interactions,',
+    '  metrics.ctr,',
+    '  metrics.average_cpc,',
+    '  metrics.average_cpm,',
+    '  metrics.conversions,',
+    '  metrics.conversions_value,',
+    '  metrics.all_conversions,',
+    '  metrics.all_conversions_value,',
+    '  metrics.view_through_conversions',
+    'FROM campaign',
+    `WHERE segments.date BETWEEN '${from}' AND '${to}'`,
+    'ORDER BY segments.date, campaign.id, segments.hour',
+  ].join('\n');
+}
+
+function adGroupQuery(from, to) {
+  return [
+    'SELECT',
+    '  segments.date,',
+    '  customer.id,',
+    '  customer.descriptive_name,',
+    '  customer.currency_code,',
+    '  campaign.id,',
+    '  campaign.name,',
+    '  ad_group.id,',
+    '  ad_group.name,',
+    '  ad_group.status,',
+    '  ad_group.type,',
+    '  metrics.cost_micros,',
+    '  metrics.impressions,',
+    '  metrics.clicks,',
+    '  metrics.interactions,',
+    '  metrics.ctr,',
+    '  metrics.average_cpc,',
+    '  metrics.average_cpm,',
+    '  metrics.conversions,',
+    '  metrics.conversions_value,',
+    '  metrics.all_conversions,',
+    '  metrics.all_conversions_value,',
+    '  metrics.view_through_conversions',
+    'FROM ad_group',
+    `WHERE segments.date BETWEEN '${from}' AND '${to}'`,
+    'ORDER BY segments.date, campaign.id, ad_group.id',
+  ].join('\n');
+}
+
+function adQuery(from, to) {
+  return [
+    'SELECT',
+    '  segments.date,',
+    '  customer.id,',
+    '  customer.descriptive_name,',
+    '  customer.currency_code,',
+    '  campaign.id,',
+    '  campaign.name,',
+    '  ad_group.id,',
+    '  ad_group.name,',
+    '  ad_group_ad.ad.id,',
+    '  ad_group_ad.ad.name,',
+    '  ad_group_ad.ad.type,',
+    '  ad_group_ad.status,',
+    '  metrics.cost_micros,',
+    '  metrics.impressions,',
+    '  metrics.clicks,',
+    '  metrics.interactions,',
+    '  metrics.ctr,',
+    '  metrics.average_cpc,',
+    '  metrics.average_cpm,',
+    '  metrics.conversions,',
+    '  metrics.conversions_value,',
+    '  metrics.all_conversions,',
+    '  metrics.all_conversions_value,',
+    '  metrics.view_through_conversions',
+    'FROM ad_group_ad',
+    `WHERE segments.date BETWEEN '${from}' AND '${to}'`,
+    'ORDER BY segments.date, campaign.id, ad_group.id, ad_group_ad.ad.id',
+  ].join('\n');
+}
+
+function keywordQuery(from, to) {
+  return [
+    'SELECT',
+    '  segments.date,',
+    '  customer.id,',
+    '  customer.descriptive_name,',
+    '  customer.currency_code,',
+    '  campaign.id,',
+    '  campaign.name,',
+    '  ad_group.id,',
+    '  ad_group.name,',
+    '  ad_group_criterion.criterion_id,',
+    '  ad_group_criterion.status,',
+    '  ad_group_criterion.keyword.text,',
+    '  ad_group_criterion.keyword.match_type,',
+    '  metrics.cost_micros,',
+    '  metrics.impressions,',
+    '  metrics.clicks,',
+    '  metrics.interactions,',
+    '  metrics.ctr,',
+    '  metrics.average_cpc,',
+    '  metrics.average_cpm,',
+    '  metrics.conversions,',
+    '  metrics.conversions_value,',
+    '  metrics.all_conversions,',
+    '  metrics.all_conversions_value',
+    'FROM keyword_view',
+    `WHERE segments.date BETWEEN '${from}' AND '${to}'`,
+    'ORDER BY segments.date, metrics.cost_micros DESC',
+  ].join('\n');
+}
+
 function searchTermQuery(from, to) {
   return [
     'SELECT',
@@ -307,12 +442,42 @@ function assetGroupQuery(from, to) {
   ].join('\n');
 }
 
+function conversionActionQuery(from, to) {
+  return [
+    'SELECT',
+    '  segments.date,',
+    '  segments.conversion_action,',
+    '  segments.conversion_action_name,',
+    '  customer.id,',
+    '  customer.descriptive_name,',
+    '  customer.currency_code,',
+    '  campaign.id,',
+    '  campaign.name,',
+    '  metrics.cost_micros,',
+    '  metrics.impressions,',
+    '  metrics.clicks,',
+    '  metrics.interactions,',
+    '  metrics.conversions,',
+    '  metrics.conversions_value,',
+    '  metrics.all_conversions,',
+    '  metrics.all_conversions_value',
+    'FROM campaign',
+    `WHERE segments.date BETWEEN '${from}' AND '${to}'`,
+    'ORDER BY segments.date, campaign.id, segments.conversion_action',
+  ].join('\n');
+}
+
 const LEVEL_QUERIES = {
   campaign: { required: true, buildQuery: campaignQuery },
   device: { required: false, buildQuery: deviceQuery },
+  hour: { required: false, buildQuery: hourQuery },
+  ad_group: { required: false, buildQuery: adGroupQuery },
+  ad: { required: false, buildQuery: adQuery },
+  keyword: { required: false, buildQuery: keywordQuery },
   search_term: { required: false, buildQuery: searchTermQuery },
   shopping_product: { required: false, buildQuery: shoppingProductQuery },
   asset_group: { required: false, buildQuery: assetGroupQuery },
+  conversion_action: { required: false, buildQuery: conversionActionQuery },
 };
 
 function customerIdFromRow(row, fallback) {
@@ -347,7 +512,7 @@ function buildMetricRow({ row, account, level, dimensions, fxRates, fetchedAt })
       level,
       campaignId: row.campaign?.id || null,
       adGroupId: row.adGroup?.id || null,
-      adId: null,
+      adId: row.adGroupAd?.ad?.id || null,
       dimensionHash,
     }),
     date: row.segments?.date,
@@ -360,6 +525,8 @@ function buildMetricRow({ row, account, level, dimensions, fxRates, fetchedAt })
     campaign_name: row.campaign?.name || null,
     ad_group_id: row.adGroup?.id ? String(row.adGroup.id) : null,
     ad_group_name: row.adGroup?.name || null,
+    ad_id: row.adGroupAd?.ad?.id ? String(row.adGroupAd.ad.id) : null,
+    ad_name: row.adGroupAd?.ad?.name || null,
     currency,
     spend_micros: numberOrNull(row.metrics?.costMicros) ?? 0,
     spend_native: roundMetric(spendNative),
@@ -421,7 +588,23 @@ function adGroupEntityRow({ row, account, fetchedAt }) {
     campaign_id: row.campaign?.id ? String(row.campaign.id) : null,
     ad_group_id: String(row.adGroup.id),
     ad_group_name: row.adGroup?.name || null,
+    group_type: row.adGroup?.type || null,
     raw_data: row.adGroup || {},
+    fetched_at: fetchedAt,
+  };
+}
+
+function adEntityRow({ row, account, fetchedAt }) {
+  if (!row.adGroupAd?.ad?.id) return null;
+  return {
+    provider: PROVIDER,
+    market: account.market,
+    account_id: customerIdFromRow(row, account.customerId),
+    campaign_id: row.campaign?.id ? String(row.campaign.id) : null,
+    ad_group_id: row.adGroup?.id ? String(row.adGroup.id) : null,
+    ad_id: String(row.adGroupAd.ad.id),
+    ad_name: row.adGroupAd.ad.name || null,
+    raw_data: row.adGroupAd || {},
     fetched_at: fetchedAt,
   };
 }
@@ -429,6 +612,33 @@ function adGroupEntityRow({ row, account, fetchedAt }) {
 function dimensionsForLevel(level, row) {
   if (level === 'device') {
     return { device: row.segments?.device || null };
+  }
+  if (level === 'hour') {
+    return { hour: row.segments?.hour ?? null };
+  }
+  if (level === 'ad_group') {
+    return {
+      ad_group_id: row.adGroup?.id ? String(row.adGroup.id) : null,
+      ad_group_name: row.adGroup?.name || null,
+      ad_group_status: row.adGroup?.status || null,
+      ad_group_type: row.adGroup?.type || null,
+    };
+  }
+  if (level === 'ad') {
+    return {
+      ad_id: row.adGroupAd?.ad?.id ? String(row.adGroupAd.ad.id) : null,
+      ad_name: row.adGroupAd?.ad?.name || null,
+      ad_type: row.adGroupAd?.ad?.type || null,
+      ad_status: row.adGroupAd?.status || null,
+    };
+  }
+  if (level === 'keyword') {
+    return {
+      criterion_id: row.adGroupCriterion?.criterionId ? String(row.adGroupCriterion.criterionId) : null,
+      keyword_text: row.adGroupCriterion?.keyword?.text || null,
+      match_type: row.adGroupCriterion?.keyword?.matchType || null,
+      keyword_status: row.adGroupCriterion?.status || null,
+    };
   }
   if (level === 'search_term') {
     return {
@@ -453,6 +663,12 @@ function dimensionsForLevel(level, row) {
       asset_group_id: row.assetGroup?.id ? String(row.assetGroup.id) : null,
       asset_group_name: row.assetGroup?.name || null,
       asset_group_status: row.assetGroup?.status || null,
+    };
+  }
+  if (level === 'conversion_action') {
+    return {
+      conversion_action: row.segments?.conversionAction || null,
+      conversion_action_name: row.segments?.conversionActionName || null,
     };
   }
   return {};
@@ -567,6 +783,7 @@ async function main() {
 
     const campaignRowsByKey = new Map();
     const adGroupRowsByKey = new Map();
+    const adRowsByKey = new Map();
     const metricRows = [];
     const rawRows = [];
 
@@ -599,6 +816,11 @@ async function main() {
             if (adGroup) {
               adGroupRowsByKey.set(`${adGroup.provider}:${adGroup.account_id}:${adGroup.ad_group_id}`, adGroup);
             }
+
+            const ad = adEntityRow({ row, account, fetchedAt });
+            if (ad) {
+              adRowsByKey.set(`${ad.provider}:${ad.account_id}:${ad.ad_id}`, ad);
+            }
           }
 
           console.log(`[sync-google-ads-detail] ${account.market.toUpperCase()} ${level}: ${rows.length} rows`);
@@ -624,6 +846,13 @@ async function main() {
       serviceRoleKey,
       table: 'ad_groups',
       onConflict: 'provider,account_id,ad_group_id',
+    });
+    rowsUpserted += await upsertSupabaseRows({
+      rows: Array.from(adRowsByKey.values()),
+      supabaseUrl,
+      serviceRoleKey,
+      table: 'ad_ads',
+      onConflict: 'provider,account_id,ad_id',
     });
     rowsUpserted += await upsertSupabaseRows({
       rows: metricRows,

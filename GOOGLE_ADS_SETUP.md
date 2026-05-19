@@ -128,15 +128,42 @@ npm run sync:ads-analytics:cz-today
 
 ## 5) Scheduled Sync
 
-Workflow:
+Workflows:
 
+- `.github/workflows/sync-ads-spend.yml`
+  - every 15 minutes
+  - lightweight `campaign` level only
+  - refreshes the last 1 day by default
+  - intended for current spend and country/market split
 - `.github/workflows/sync-ads-analytics.yml`
+  - once per day
+  - deep detail levels
+  - refreshes the last 3 days by default
+  - intended for campaign diagnostics and analytical history
 
-Recommended cadence:
+Current Google Ads detail levels:
 
-- every 4 hours for the last 14 days, because attribution and conversion values
-  can settle late
-- manual backfill via `workflow_dispatch` with `SYNC_FROM_DATE` / `SYNC_TO_DATE`
+- `campaign`
+- `device`
+- `hour`
+- `ad_group`
+- `ad`
+- `keyword`
+- `search_term`
+- `shopping_product`
+- `asset_group`
+- `conversion_action`
+
+Quota discipline:
+
+- do not run deep detail sync every 15 minutes
+- use campaign-only sync for frequent spend refreshes
+- run large historical backfills manually in chunks
+- if the developer token has Google Ads API Explorer Access, budget for 2,880
+  operations/day and request Basic/Standard access before widening history or
+  adding many more accounts
+
+- manual backfill via `workflow_dispatch` with `from_date` / `to_date`
 - the workflow skips providers whose secrets are not filled yet, so Google can
   run before Meta is connected
 
@@ -148,6 +175,9 @@ For Google Ads:
 - Shopping product AOV and conversion value
 - search terms that spend but bring no value
 - device split
+- hourly split
+- ad group / ad / keyword split
+- conversion action split
 - Performance Max asset group split
 
 For Meta Ads:
