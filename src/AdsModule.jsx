@@ -50,6 +50,7 @@ const formatDate = (value) => {
   const [, month, day] = String(value || '').split('-');
   return month && day ? `${day}.${month}.` : value;
 };
+const formatSignedPercent = (value) => `${toNumber(value) > 0 ? '+' : ''}${toNumber(value).toFixed(1)} %`;
 
 const emptyMetrics = () => ({
   spend: 0,
@@ -316,6 +317,259 @@ function aggregateDetails(rows, level) {
     .slice(0, 12);
 }
 
+function insight({ severity = 'info', title, finding, evidence, recommendation, confidence = 'střední' }) {
+  return { severity, title, finding, evidence, recommendation, confidence };
+}
+
+function buildPpcInsights({
+  total,
+  businessTotal,
+  orderTotal,
+  markets,
+  campaigns,
+  topSearchTerms,
+  topProducts,
+  topKeywords,
+  topAssetGroups,
+  topHours,
+  daily,
+}) {
+  const insights = [];
+  const minSpend = Math.max(total.spend * 0.03, 250);
+  const meaningfulCampaignSpend = Math.max(total.spend * 0.08, 500);
+  const highSpend = Math.max(total.spend * 0.12, 800);
+
+  if (total.spend <= 0) {
+    return [
+      insight({
+        severity: 'warning',
+        title: 'Bez Ads spendu ve filtru',
+        finding: 'Pro vybrané období nevidím žádné náklady z reklam.',
+        evidence: `Filtr obsahuje ${formatCurrency(businessTotal.realRevenue)} tržeb a ${formatNumber(orderTotal.orders)} objednávek, ale Ads spend je ${formatCurrency(total.spend)}.`,
+        recommendation: 'Ověřit rozsah data/země a poslední sync. Pokud je filtr správně, toto období není použitelné pro PPC vyhodnocení.',
+        confidence: 'vysoká',
+      }),
+    ];
+  }
+
+  if (businessTotal.grossProfitAfterAds < 0) {
+    insights.push(insight({
+      severity: 'critical',
+      title: 'Reklama snědla celý přesný hrubý zisk',
+      finding: 'Po odečtení Ads spendu je vybrané období v záporném hrubém výsledku.',
+      evidence: `Přesný hrubý zisk ${formatCurrency(businessTotal.exactGrossProfit)}, spend ${formatCurrency(total.spend)}, zisk po Ads ${formatCurrency(businessTotal.grossProfitAfterAds)}.`,
+      recommendation: 'Nejdřív škrtat nebo omezit části s nulovou konverzí a nízkou hodnotou objednávek; škálování řešit až po návratu nad nulu.',
+      confidence: 'vysoká',
+    }));
+  } else if (businessTotal.spendToGrossProfit > 45) {
+    insights.push(insight({
+      severity: 'warning',
+      title: 'Ads berou velkou část hrubého zisku',
+      finding: 'Období je ziskové, ale reklama spotřebuje významnou část přesného hrubého zisku.',
+      evidence: `Ads vs zisk ${formatPercent(businessTotal.spendToGrossProfit)}, PNO ${formatPercent(businessTotal.pno)}, zisk po Ads ${formatCurrency(businessTotal.grossProfitAfterAds)}.`,
+      recommendation: 'Řídit optimalizaci podle zisku po Ads, ne podle platformního ROAS. Při navyšování rozpočtu hlídat PNO a mix produktů.',
+      confidence: 'vysoká',
+    }));
+  } else {
+    insights.push(insight({
+      severity: 'good',
+      title: 'Business výsledek po reklamě drží',
+      finding: 'Vybrané období má po odečtení Ads spendu kladný přesný hrubý výsledek.',
+      evidence: `Zisk po Ads ${formatCurrency(businessTotal.grossProfitAfterAds)}, Real ROAS ${formatRatio(businessTotal.realRoas)}, PNO ${formatPercent(businessTotal.pno)}.`,
+      recommendation: 'Hledat škálovatelná místa podle zemí a kampaní, kde zůstává kladný zisk po Ads a zároveň je dostatečný objem.',
+      confidence: 'střední',
+    }));
+  }
+
+  const platformDelta = businessTotal.realRevenue
+    ? ((total.conversionValue - businessTotal.realRevenue) / businessTotal.realRevenue) * 100
+    : 0;
+  if (Math.abs(platformDelta) > 20) {
+    insights.push(insight({
+      severity: 'warning',
+      title: 'Platformní hodnota se rozchází s realitou objednávek',
+      finding: platformDelta > 0
+        ? 'Google/Meta reportuje výrazně vyšší konverzní hodnotu než reálné objednávky ve filtru.'
+        : 'Google/Meta reportuje výrazně nižší konverzní hodnotu než reálné objednávky ve filtru.',
+      evidence: `Platformní hodnota ${formatCurrency(total.conversionValue)}, real tržby ${formatCurrency(businessTotal.realRevenue)}, rozdíl ${formatSignedPercent(platformDelta)}.`,
+      recommendation: 'Brát platform ROAS jen jako signál pro optimalizaci v účtu; pro řízení firmy používat Real ROAS, PNO a zisk po Ads.',
+      confidence: 'střední',
+    }));
+  }
+
+  const worstMarket = markets
+    .filter((row) => row.spend >= highSpend || row.realRevenue > 0)
+    .sort((a, b) => a.grossProfitAfterAds - b.grossProfitAfterAds)[0];
+  if (worstMarket && worstMarket.grossProfitAfterAds < 0) {
+    insights.push(insight({
+      severity: 'critical',
+      title: `Nejslabší trh po Ads: ${marketLabel(worstMarket.market)}`,
+      finding: 'Jeden trh vychází po započtení reklam záporně.',
+      evidence: `${providerLabel(worstMarket.provider)} / ${marketLabel(worstMarket.market)}: spend ${formatCurrency(worstMarket.spend)}, real tržby ${formatCurrency(worstMarket.realRevenue)}, zisk po Ads ${formatCurrency(worstMarket.grossProfitAfterAds)}, PNO ${formatPercent(worstMarket.pno)}.`,
+      recommendation: 'V tomto trhu projít kampaně a produktový mix; nepřidávat rozpočet, dokud není jasné, které kampaně nesou nízkou hodnotu objednávky.',
+      confidence: 'vysoká',
+    }));
+  }
+
+  const bestMarket = markets
+    .filter((row) => row.spend >= minSpend && row.grossProfitAfterAds > 0)
+    .sort((a, b) => b.grossProfitAfterAds - a.grossProfitAfterAds)[0];
+  if (bestMarket) {
+    insights.push(insight({
+      severity: 'good',
+      title: `Nejlepší trh po Ads: ${marketLabel(bestMarket.market)}`,
+      finding: 'Tady vychází kombinace spendu, tržeb a hrubého zisku nejlépe.',
+      evidence: `${providerLabel(bestMarket.provider)} / ${marketLabel(bestMarket.market)}: zisk po Ads ${formatCurrency(bestMarket.grossProfitAfterAds)}, Real ROAS ${formatRatio(bestMarket.realRoas)}, PNO ${formatPercent(bestMarket.pno)}.`,
+      recommendation: 'Prověřit, jestli je zde prostor škálovat bez poklesu AOV a marže; ideálně porovnat top produkty a search terms proti slabším trhům.',
+      confidence: 'střední',
+    }));
+  }
+
+  const wasteCampaign = campaigns
+    .filter((row) => row.spend >= meaningfulCampaignSpend && row.conversions <= 0)
+    .sort((a, b) => b.spend - a.spend)[0];
+  if (wasteCampaign) {
+    insights.push(insight({
+      severity: 'critical',
+      title: 'Kampaň utrácí bez konverzí',
+      finding: 'Ve vybraném období je vidět kampaň s významným spendem a nulovými konverzemi.',
+      evidence: `${wasteCampaign.campaignName}: spend ${formatCurrency(wasteCampaign.spend)}, kliky ${formatNumber(wasteCampaign.clicks)}, konverze ${formatNumber(wasteCampaign.conversions)}.`,
+      recommendation: 'Zkontrolovat search terms, produkty a bidding této kampaně. Pokud nejde o krátké učení nebo brand/upper funnel, dát ji do priority pro omezení.',
+      confidence: 'vysoká',
+    }));
+  }
+
+  const lowRoasCampaign = campaigns
+    .filter((row) => row.spend >= meaningfulCampaignSpend && row.conversions > 0 && row.roas > 0)
+    .sort((a, b) => a.roas - b.roas)[0];
+  if (lowRoasCampaign && lowRoasCampaign.roas < Math.max(businessTotal.realRoas * 0.55, 1.2)) {
+    insights.push(insight({
+      severity: 'warning',
+      title: 'Kampaň táhne efektivitu dolů',
+      finding: 'Jedna z utrácejících kampaní má výrazně horší ROAS než celek.',
+      evidence: `${lowRoasCampaign.campaignName}: ROAS ${formatRatio(lowRoasCampaign.roas)}, spend ${formatCurrency(lowRoasCampaign.spend)}, AOV ${formatCurrency(lowRoasCampaign.aov)}; celek Real ROAS ${formatRatio(businessTotal.realRoas)}.`,
+      recommendation: 'Rozpadnout ji podle produktů/search terms. Pokud nosí levné objednávky, držet ji na cílech podle zisku, ne podle samotného objemu.',
+      confidence: 'střední',
+    }));
+  }
+
+  const bestCampaign = campaigns
+    .filter((row) => row.spend >= meaningfulCampaignSpend && row.roas >= Math.max(total.roas, 1))
+    .sort((a, b) => b.conversionValue - a.conversionValue)[0];
+  if (bestCampaign) {
+    insights.push(insight({
+      severity: 'good',
+      title: 'Kandidát na škálování',
+      finding: 'Kampaň kombinuje rozumný spend s nadprůměrnou konverzní hodnotou.',
+      evidence: `${bestCampaign.campaignName}: ROAS ${formatRatio(bestCampaign.roas)}, konv. hodnota ${formatCurrency(bestCampaign.conversionValue)}, spend ${formatCurrency(bestCampaign.spend)}.`,
+      recommendation: 'Před navýšením rozpočtu ověřit, že netahá jen levné položky s nízkou marží. Pokud sedí produktový mix, testovat opatrné navýšení.',
+      confidence: 'střední',
+    }));
+  }
+
+  const wastedSearchTerm = topSearchTerms
+    .filter((row) => row.spend >= minSpend && row.conversions <= 0)
+    .sort((a, b) => b.spend - a.spend)[0];
+  if (wastedSearchTerm) {
+    insights.push(insight({
+      severity: 'warning',
+      title: 'Search term bez návratnosti',
+      finding: 'Dotaz utrácí, ale ve vybraném období nepřinesl konverzi.',
+      evidence: `"${wastedSearchTerm.label}": spend ${formatCurrency(wastedSearchTerm.spend)}, kliky ${formatNumber(wastedSearchTerm.clicks)}, kampaň ${wastedSearchTerm.campaignName || 'neuvedeno'}.`,
+      recommendation: 'Prověřit relevanci dotazu, landing page a negativní klíčová slova. Pokud je mimo nákupní intent, vyloučit nebo oddělit.',
+      confidence: 'střední',
+    }));
+  }
+
+  const weakProduct = topProducts
+    .filter((row) => row.spend >= minSpend && row.roas < 1.2)
+    .sort((a, b) => b.spend - a.spend)[0];
+  if (weakProduct) {
+    insights.push(insight({
+      severity: 'warning',
+      title: 'Produkt se slabou návratností',
+      finding: 'Shopping produkt nebo položka feedu má spend, ale nízkou platformní návratnost.',
+      evidence: `${weakProduct.label}: spend ${formatCurrency(weakProduct.spend)}, ROAS ${formatRatio(weakProduct.roas)}, konverze ${formatNumber(weakProduct.conversions)}.`,
+      recommendation: 'Zkontrolovat cenu po zlevnění, nákupku, feed title a produktovou konkurenceschopnost. Produkt může být zdrojem nízkého AOV.',
+      confidence: 'střední',
+    }));
+  }
+
+  const weakKeyword = topKeywords
+    .filter((row) => row.spend >= minSpend && row.conversions <= 0)
+    .sort((a, b) => b.spend - a.spend)[0];
+  if (weakKeyword) {
+    insights.push(insight({
+      severity: 'info',
+      title: 'Keyword ke kontrole',
+      finding: 'Klíčové slovo má spend bez konverzí ve vybraném období.',
+      evidence: `${weakKeyword.label}: spend ${formatCurrency(weakKeyword.spend)}, match ${weakKeyword.subLabel || 'neuvedeno'}, kampaň ${weakKeyword.campaignName || 'neuvedeno'}.`,
+      recommendation: 'Porovnat s reálnými search terms. Pokud query driftuje, zpřísnit match nebo přidat negativy.',
+      confidence: 'nižší',
+    }));
+  }
+
+  const pmaxSignal = topAssetGroups
+    .filter((row) => row.spend >= minSpend)
+    .sort((a, b) => b.spend - a.spend)[0];
+  if (pmaxSignal && pmaxSignal.roas < Math.max(total.roas * 0.6, 1)) {
+    insights.push(insight({
+      severity: 'warning',
+      title: 'PMax asset group potřebuje kontrolu',
+      finding: 'Asset group s významným spendem má slabší návratnost než celek.',
+      evidence: `${pmaxSignal.label}: spend ${formatCurrency(pmaxSignal.spend)}, ROAS ${formatRatio(pmaxSignal.roas)}, konverze ${formatNumber(pmaxSignal.conversions)}.`,
+      recommendation: 'Projít produkty a assety v této asset group; u PMax hlídat, jestli netlačí levné/nízkomaržové položky.',
+      confidence: 'střední',
+    }));
+  }
+
+  const bestHour = topHours
+    .filter((row) => row.spend >= minSpend && row.roas > 0)
+    .sort((a, b) => b.roas - a.roas)[0];
+  if (bestHour) {
+    insights.push(insight({
+      severity: 'info',
+      title: 'Hodinový signál',
+      finding: 'V hodinovém rozpadu je okno s výrazně lepší návratností.',
+      evidence: `${bestHour.label}: ROAS ${formatRatio(bestHour.roas)}, spend ${formatCurrency(bestHour.spend)}, konverze ${formatNumber(bestHour.conversions)}.`,
+      recommendation: 'Nepřepínat hned bidding podle jedné periody, ale sledovat opakování vzoru po dnech. Pokud se opakuje, může pomoct dayparting nebo rozpočtová priorita.',
+      confidence: 'nižší',
+    }));
+  }
+
+  if (orderTotal.missingCostOrders > 0) {
+    insights.push(insight({
+      severity: 'info',
+      title: 'Část objednávek nemá přesnou nákupku',
+      finding: 'Zisk po Ads počítá přesný hrubý zisk jen z objednávek, kde máme nákupní ceny u všech produktů.',
+      evidence: `${formatNumber(orderTotal.missingCostOrders)} objednávek ve filtru nemá kompletní nákupku; přesných je ${formatNumber(orderTotal.exactOrders)}.`,
+      recommendation: 'Doplnit nákupky u chybějících produktů, jinak může být vyhodnocení zisku po reklamě konzervativní nebo zkreslené.',
+      confidence: 'vysoká',
+    }));
+  }
+
+  const worstDay = daily
+    .filter((row) => row.spend >= minSpend)
+    .sort((a, b) => a.grossProfitAfterAds - b.grossProfitAfterAds)[0];
+  if (worstDay && worstDay.grossProfitAfterAds < 0) {
+    insights.push(insight({
+      severity: 'warning',
+      title: 'Den s negativním výsledkem po Ads',
+      finding: 'V časové řadě je den, kdy spend převýšil přesný hrubý zisk.',
+      evidence: `${worstDay.label}: spend ${formatCurrency(worstDay.spend)}, real tržby ${formatCurrency(worstDay.realRevenue)}, zisk po Ads ${formatCurrency(worstDay.grossProfitAfterAds)}.`,
+      recommendation: 'Pro tento den porovnat kampaně, produkty a search terms proti okolním dnům; často odhalí změnu v mixu nebo krátkodobý výkyv.',
+      confidence: 'střední',
+    }));
+  }
+
+  return insights
+    .sort((a, b) => {
+      const order = { critical: 0, warning: 1, info: 2, good: 3 };
+      return order[a.severity] - order[b.severity];
+    })
+    .slice(0, 8);
+}
+
 function Kpi({ label, value, sub, tone = 'slate' }) {
   const toneClass = {
     emerald: 'border-emerald-200 bg-emerald-50 text-emerald-800',
@@ -329,6 +583,39 @@ function Kpi({ label, value, sub, tone = 'slate' }) {
       <div className="text-xs font-medium opacity-75">{label}</div>
       <div className="mt-1 text-2xl font-bold">{value}</div>
       {sub && <div className="mt-1 text-xs opacity-75">{sub}</div>}
+    </div>
+  );
+}
+
+function InsightCard({ item }) {
+  const classes = {
+    critical: 'border-red-200 bg-red-50 text-red-900',
+    warning: 'border-amber-200 bg-amber-50 text-amber-900',
+    info: 'border-blue-200 bg-blue-50 text-blue-900',
+    good: 'border-emerald-200 bg-emerald-50 text-emerald-900',
+  }[item.severity] || 'border-slate-200 bg-slate-50 text-slate-800';
+
+  const label = {
+    critical: 'Priorita',
+    warning: 'Pozor',
+    info: 'Signál',
+    good: 'Příležitost',
+  }[item.severity] || 'Insight';
+
+  return (
+    <div className={`rounded-lg border p-4 ${classes}`}>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="text-xs font-semibold uppercase tracking-wide opacity-70">{label}</div>
+        <div className="text-[11px] opacity-70">Jistota: {item.confidence}</div>
+      </div>
+      <div className="text-sm font-bold">{item.title}</div>
+      <div className="mt-2 text-sm leading-relaxed">{item.finding}</div>
+      <div className="mt-3 rounded-md bg-white/55 p-2 text-xs leading-relaxed">
+        <span className="font-semibold">Důkaz: </span>{item.evidence}
+      </div>
+      <div className="mt-2 text-xs leading-relaxed">
+        <span className="font-semibold">Další krok: </span>{item.recommendation}
+      </div>
     </div>
   );
 }
@@ -575,6 +862,31 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
   const topAssetGroups = useMemo(() => aggregateDetails(detailRows, 'asset_group'), [detailRows]);
   const topHours = useMemo(() => aggregateDetails(detailRows, 'hour'), [detailRows]);
   const topConversionActions = useMemo(() => aggregateDetails(detailRows, 'conversion_action'), [detailRows]);
+  const ppcInsights = useMemo(() => buildPpcInsights({
+    total,
+    businessTotal,
+    orderTotal,
+    markets,
+    campaigns,
+    topSearchTerms,
+    topProducts,
+    topKeywords,
+    topAssetGroups,
+    topHours,
+    daily,
+  }), [
+    total,
+    businessTotal,
+    orderTotal,
+    markets,
+    campaigns,
+    topSearchTerms,
+    topProducts,
+    topKeywords,
+    topAssetGroups,
+    topHours,
+    daily,
+  ]);
   const latestRun = syncRuns[0];
 
   if (loading) {
@@ -620,6 +932,18 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
         <Kpi label="Real ROAS" value={formatRatio(businessTotal.realRoas)} sub="tržby / spend" tone="blue" />
         <Kpi label="PNO" value={formatPercent(businessTotal.pno)} sub="spend / tržby" />
         <Kpi label="Ads vs zisk" value={formatPercent(businessTotal.spendToGrossProfit)} sub={`${formatNumber(orderTotal.missingCostOrders)} obj. bez přesné nákupky`} />
+      </div>
+
+      <div>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold text-slate-800">Senior PPC interpretace</h3>
+          <div className="text-xs text-slate-500">{formatNumber(ppcInsights.length)} signálů</div>
+        </div>
+        <div className="grid gap-3 lg:grid-cols-2">
+          {ppcInsights.map((item, index) => (
+            <InsightCard key={`${item.severity}:${item.title}:${index}`} item={item} />
+          ))}
+        </div>
       </div>
 
       <div className="rounded-lg border border-slate-200 p-3">
