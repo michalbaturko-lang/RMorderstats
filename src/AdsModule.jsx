@@ -87,6 +87,10 @@ const formatDateTime = (value) => {
   return date.toLocaleString('cs-CZ', { dateStyle: 'short', timeStyle: 'short' });
 };
 const formatSignedPercent = (value) => `${toNumber(value) > 0 ? '+' : ''}${toNumber(value).toFixed(1)} %`;
+const isMissingViewError = (error) => {
+  const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
+  return /PGRST205|PGRST204|schema cache|could not find|relation .* does not exist/i.test(text);
+};
 
 const emptyMetrics = () => ({
   spend: 0,
@@ -192,6 +196,19 @@ function aggregateOrdersByMarket(orders) {
   return byMarket;
 }
 
+function orderMetricsFromBusinessRows(rows) {
+  return rows.reduce((acc, row) => {
+    acc.orders += toNumber(row.orders);
+    acc.exactOrders += toNumber(row.exact_orders);
+    acc.revenue += toNumber(row.real_revenue_czk);
+    acc.exactRevenue += toNumber(row.exact_revenue_czk);
+    acc.exactCost += toNumber(row.exact_cost_czk);
+    acc.exactGrossProfit += toNumber(row.exact_gross_profit_czk);
+    acc.missingCostOrders += toNumber(row.missing_cost_orders);
+    return acc;
+  }, emptyOrderMetrics());
+}
+
 const metricSummary = (rows) => enrichMetrics(rows.reduce((acc, row) => {
   addMetrics(acc, row);
   return acc;
@@ -256,6 +273,30 @@ function aggregateDaily(rows, orderByDate) {
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
 }
 
+function aggregateDailyFromBusinessRows(rows) {
+  return rows
+    .map((row) => {
+      const enriched = enrichMetrics({
+        date: row.date,
+        label: formatDate(row.date),
+        spend: toNumber(row.spend_czk),
+        impressions: toNumber(row.impressions),
+        clicks: toNumber(row.clicks),
+        interactions: toNumber(row.interactions),
+        conversions: toNumber(row.conversions),
+        conversionValue: toNumber(row.conversion_value_czk),
+      });
+      return {
+        ...enriched,
+        realRevenue: toNumber(row.real_revenue_czk),
+        exactGrossProfit: toNumber(row.exact_gross_profit_czk),
+        grossProfitAfterAds: toNumber(row.gross_profit_after_ads_czk),
+        realRoas: enriched.spend ? toNumber(row.real_revenue_czk) / enriched.spend : 0,
+      };
+    })
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+
 function aggregateMarkets(rows, orderByMarket, dateFrom, dateTo) {
   const byKey = new Map();
   const expectedDays = inclusiveDayCount(dateFrom, dateTo);
@@ -296,6 +337,52 @@ function aggregateMarkets(rows, orderByMarket, dateFrom, dateTo) {
         grossProfitAfterAds: orders.exactGrossProfit - enriched.spend,
         realRoas: enriched.spend ? orders.revenue / enriched.spend : 0,
         pno: orders.revenue ? (enriched.spend / orders.revenue) * 100 : 0,
+      };
+    })
+    .sort((a, b) => b.spend - a.spend);
+}
+
+function aggregateMarketsFromBusinessRows(rows, dateFrom, dateTo) {
+  const byKey = new Map();
+  const expectedDays = inclusiveDayCount(dateFrom, dateTo);
+  for (const row of rows) {
+    const key = `${row.provider}:${row.market}`;
+    if (!byKey.has(key)) {
+      byKey.set(key, {
+        key,
+        provider: row.provider,
+        market: row.market,
+        dates: new Set(),
+        firstDate: null,
+        lastDate: null,
+        expectedDays,
+        ...emptyMetrics(),
+        realRevenue: 0,
+        exactGrossProfit: 0,
+      });
+    }
+    const target = byKey.get(key);
+    if (row.date) {
+      target.dates.add(row.date);
+      target.firstDate = !target.firstDate || row.date < target.firstDate ? row.date : target.firstDate;
+      target.lastDate = !target.lastDate || row.date > target.lastDate ? row.date : target.lastDate;
+    }
+    addMetrics(target, row);
+    target.realRevenue += toNumber(row.real_revenue_czk);
+    target.exactGrossProfit += toNumber(row.exact_gross_profit_czk);
+  }
+
+  return Array.from(byKey.values())
+    .map((row) => {
+      const enriched = enrichMetrics(row);
+      const days = row.dates.size;
+      return {
+        ...enriched,
+        days,
+        coveragePct: expectedDays ? (days / expectedDays) * 100 : 0,
+        grossProfitAfterAds: row.exactGrossProfit - enriched.spend,
+        realRoas: enriched.spend ? row.realRevenue / enriched.spend : 0,
+        pno: row.realRevenue ? (enriched.spend / row.realRevenue) * 100 : 0,
       };
     })
     .sort((a, b) => b.spend - a.spend);
@@ -890,7 +977,32 @@ function ProviderCoverageCard({ row }) {
   );
 }
 
-function DataReadinessPanel({ providerCoverage, detailCoverage, orderTotal }) {
+function BusinessSourceCard({ state }) {
+  const status = state?.status || 'fallback';
+  const tone = status === 'loaded'
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+    : status === 'error'
+      ? 'border-amber-200 bg-amber-50 text-amber-900'
+      : 'border-blue-200 bg-blue-50 text-blue-900';
+  const label = status === 'loaded' ? 'VIEWS OK' : status === 'error' ? 'FALLBACK' : 'FALLBACK';
+
+  return (
+    <div className={`rounded-lg border p-3 ${tone}`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-bold">Business metriky</div>
+        <StatusBadge value={label} />
+      </div>
+      <div className="mt-2 text-2xl font-bold">{status === 'loaded' ? 'Supabase' : 'React'}</div>
+      <div className="mt-1 text-xs leading-relaxed opacity-80">
+        {status === 'loaded'
+          ? `${formatNumber(state.totalRows)} denních a ${formatNumber(state.providerRows)} provider řádků z business views.`
+          : state?.message || 'Počítá se z objednávek načtených pro aktuální filtr; po aplikaci SQL views se přepne na Supabase.'}
+      </div>
+    </div>
+  );
+}
+
+function DataReadinessPanel({ providerCoverage, detailCoverage, orderTotal, businessViewState }) {
   const exactShare = orderTotal.orders ? (orderTotal.exactOrders / orderTotal.orders) * 100 : 0;
   const activeDetails = detailCoverage.filter((row) => row.rows > 0);
 
@@ -900,10 +1012,11 @@ function DataReadinessPanel({ providerCoverage, detailCoverage, orderTotal }) {
         <h3 className="text-sm font-semibold text-slate-800">Datová připravenost</h3>
         <div className="text-xs text-slate-500">{formatNumber(activeDetails.length)} detailních vrstev</div>
       </div>
-      <div className="grid gap-3 lg:grid-cols-3">
+      <div className="grid gap-3 lg:grid-cols-4">
         {providerCoverage.map((row) => (
           <ProviderCoverageCard key={row.provider} row={row} />
         ))}
+        <BusinessSourceCard state={businessViewState} />
         <div className={`rounded-lg border p-3 ${exactShare >= 95 ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
           <div className="flex items-center justify-between gap-3">
             <div className="text-sm font-bold">Maržová přesnost</div>
@@ -935,7 +1048,7 @@ function DataReadinessPanel({ providerCoverage, detailCoverage, orderTotal }) {
 }
 
 function StatusBadge({ value }) {
-  const active = ['ENABLED', 'SERVING', 'OK', 'DATA OK', 'SUCCESS'].includes(String(value || '').toUpperCase());
+  const active = ['ENABLED', 'SERVING', 'OK', 'DATA OK', 'VIEWS OK', 'SUCCESS'].includes(String(value || '').toUpperCase());
   const paused = ['PAUSED', 'REMOVED'].includes(String(value || '').toUpperCase());
   const classes = active
     ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
@@ -1065,6 +1178,14 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
   const [campaignMetaRows, setCampaignMetaRows] = useState([]);
   const [detailRows, setDetailRows] = useState([]);
   const [syncRuns, setSyncRuns] = useState([]);
+  const [businessDailyRows, setBusinessDailyRows] = useState([]);
+  const [businessProviderRows, setBusinessProviderRows] = useState([]);
+  const [businessViewState, setBusinessViewState] = useState({
+    status: 'fallback',
+    totalRows: 0,
+    providerRows: 0,
+    message: 'Počítá se z objednávek načtených pro aktuální filtr.',
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -1113,10 +1234,32 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
         .order('started_at', { ascending: false })
         .limit(12);
 
-      const [campaignMetricResult, metaResult, runsResult, ...detailResults] = await Promise.all([
+      const businessDailyQuery = applyMarket(
+        supabaseClient
+          .from('marketing_business_daily_total')
+          .select('date,market,spend_czk,impressions,clicks,interactions,conversions,conversion_value_czk,orders,exact_orders,missing_cost_orders,real_revenue_czk,exact_revenue_czk,exact_cost_czk,exact_gross_profit_czk,gross_profit_after_ads_czk,pno,real_roas,spend_to_gross_profit_pct')
+          .gte('date', dateFrom)
+          .lte('date', dateTo)
+          .order('date', { ascending: true })
+          .range(0, 9999)
+      );
+
+      const businessProviderQuery = applyMarket(
+        supabaseClient
+          .from('marketing_business_provider_daily_summary')
+          .select('date,market,provider,spend_czk,impressions,clicks,interactions,conversions,conversion_value_czk,orders,exact_orders,missing_cost_orders,real_revenue_czk,exact_revenue_czk,exact_cost_czk,exact_gross_profit_czk,gross_profit_after_ads_czk,pno,real_roas,spend_to_gross_profit_pct')
+          .gte('date', dateFrom)
+          .lte('date', dateTo)
+          .order('date', { ascending: true })
+          .range(0, 9999)
+      );
+
+      const [campaignMetricResult, metaResult, runsResult, businessDailyResult, businessProviderResult, ...detailResults] = await Promise.all([
         campaignMetricQuery,
         metaQuery,
         runsQuery,
+        businessDailyQuery,
+        businessProviderQuery,
         ...detailQueries,
       ]);
 
@@ -1124,11 +1267,37 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
       if (firstError) throw firstError;
 
       if (!cancelled) {
+        const businessError = [businessDailyResult, businessProviderResult].find((result) => result.error)?.error;
+        const businessMissing = businessError && isMissingViewError(businessError);
+        const businessAvailable = !businessError;
+
         setDailyRows(campaignMetricResult.data || []);
         setCampaignRows(campaignMetricResult.data || []);
         setDetailRows(detailResults.flatMap((result) => result.data || []));
         setCampaignMetaRows(metaResult.data || []);
         setSyncRuns(runsResult.data || []);
+        setBusinessDailyRows(businessAvailable ? (businessDailyResult.data || []) : []);
+        setBusinessProviderRows(businessAvailable ? (businessProviderResult.data || []) : []);
+        setBusinessViewState(businessAvailable
+          ? {
+              status: 'loaded',
+              totalRows: (businessDailyResult.data || []).length,
+              providerRows: (businessProviderResult.data || []).length,
+              message: '',
+            }
+          : businessMissing
+            ? {
+                status: 'fallback',
+                totalRows: 0,
+                providerRows: 0,
+                message: 'Business views zatím nejsou v Supabase aplikované; počítá se fallbackem z objednávek ve filtru.',
+              }
+            : {
+                status: 'error',
+                totalRows: 0,
+                providerRows: 0,
+                message: `Business views se nepodařilo načíst: ${businessError.message || 'neznámá chyba'}.`,
+              });
       }
     }
 
@@ -1153,7 +1322,11 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
     return map;
   }, [campaignMetaRows]);
 
-  const orderTotal = useMemo(() => aggregateOrders(orders), [orders]);
+  const businessViewsLoaded = businessViewState.status === 'loaded';
+  const businessViewsHaveRows = businessViewsLoaded && businessDailyRows.length > 0;
+  const localOrderTotal = useMemo(() => aggregateOrders(orders), [orders]);
+  const businessOrderTotal = useMemo(() => orderMetricsFromBusinessRows(businessDailyRows), [businessDailyRows]);
+  const orderTotal = businessViewsHaveRows ? businessOrderTotal : localOrderTotal;
   const orderByDate = useMemo(() => aggregateOrdersByDate(orders), [orders]);
   const orderByMarket = useMemo(() => aggregateOrdersByMarket(orders), [orders]);
   const total = useMemo(() => metricSummary(dailyRows), [dailyRows]);
@@ -1165,8 +1338,16 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
     pno: orderTotal.revenue ? (total.spend / orderTotal.revenue) * 100 : 0,
     spendToGrossProfit: orderTotal.exactGrossProfit ? (total.spend / orderTotal.exactGrossProfit) * 100 : 0,
   }), [orderTotal, total]);
-  const daily = useMemo(() => aggregateDaily(dailyRows, orderByDate), [dailyRows, orderByDate]);
-  const markets = useMemo(() => aggregateMarkets(dailyRows, orderByMarket, dateFrom, dateTo), [dailyRows, orderByMarket, dateFrom, dateTo]);
+  const daily = useMemo(
+    () => (businessViewsHaveRows ? aggregateDailyFromBusinessRows(businessDailyRows) : aggregateDaily(dailyRows, orderByDate)),
+    [businessViewsHaveRows, businessDailyRows, dailyRows, orderByDate]
+  );
+  const markets = useMemo(
+    () => (businessViewsLoaded && businessProviderRows.length
+      ? aggregateMarketsFromBusinessRows(businessProviderRows, dateFrom, dateTo)
+      : aggregateMarkets(dailyRows, orderByMarket, dateFrom, dateTo)),
+    [businessViewsLoaded, businessProviderRows, dailyRows, orderByMarket, dateFrom, dateTo]
+  );
   const campaigns = useMemo(() => aggregateCampaigns(campaignRows, campaignMeta), [campaignRows, campaignMeta]);
   const topAdGroups = useMemo(() => aggregateDetails(detailRows, 'ad_group'), [detailRows]);
   const topAds = useMemo(() => aggregateDetails(detailRows, 'ad'), [detailRows]);
@@ -1261,7 +1442,12 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
         <Kpi label="Ads vs zisk" value={formatPercent(businessTotal.spendToGrossProfit)} sub={`${formatNumber(orderTotal.missingCostOrders)} obj. bez přesné nákupky`} />
       </div>
 
-      <DataReadinessPanel providerCoverage={providerCoverage} detailCoverage={detailCoverage} orderTotal={orderTotal} />
+      <DataReadinessPanel
+        providerCoverage={providerCoverage}
+        detailCoverage={detailCoverage}
+        orderTotal={orderTotal}
+        businessViewState={businessViewState}
+      />
 
       <div>
         <div className="mb-3 flex items-center justify-between gap-3">
