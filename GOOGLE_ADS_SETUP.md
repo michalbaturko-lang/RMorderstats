@@ -166,6 +166,15 @@ Workflows:
     provider and market
   - uses the same order hygiene as the dashboard: deduplicate orders first,
     then remove cancelled/STORNO orders before revenue and margin comparison
+- `.github/workflows/check-ads-business-views.yml`
+  - manual read-only verifier for `supabase/ad_business_analytics_views.sql`
+  - compares `order_business_daily_summary`,
+    `marketing_business_provider_daily_summary` and
+    `marketing_business_daily_total` against source `orders` and
+    campaign-level `ad_metrics_daily`
+  - run once with `require_views=0` before the SQL is applied if you only want
+    a missing-view readiness check, then with `require_views=1` after applying
+    the SQL to prove the views match the dashboard/audit calculations
 
 Current Google Ads detail levels:
 
