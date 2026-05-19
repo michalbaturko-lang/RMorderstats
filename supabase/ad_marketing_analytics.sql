@@ -200,7 +200,8 @@ create trigger ad_metrics_daily_set_updated_at
 before update on public.ad_metrics_daily
 for each row execute function public.set_updated_at_timestamp();
 
-create or replace view public.marketing_daily_summary as
+create or replace view public.marketing_daily_summary
+with (security_invoker = true) as
 select
   date,
   market,
@@ -224,7 +225,8 @@ from public.ad_metrics_daily
 where level = 'campaign'
 group by date, market, provider, currency;
 
-create or replace view public.marketing_campaign_daily_summary as
+create or replace view public.marketing_campaign_daily_summary
+with (security_invoker = true) as
 select
   date,
   market,
@@ -251,6 +253,11 @@ select
 from public.ad_metrics_daily
 where level = 'campaign'
 group by date, market, provider, account_id, account_name, campaign_id, campaign_name, currency;
+
+revoke all on public.marketing_daily_summary from anon;
+revoke all on public.marketing_campaign_daily_summary from anon;
+grant select on public.marketing_daily_summary to authenticated;
+grant select on public.marketing_campaign_daily_summary to authenticated;
 
 alter table public.ad_accounts enable row level security;
 alter table public.ad_campaigns enable row level security;

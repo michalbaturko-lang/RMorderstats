@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import AdsModule from './AdsModule';
 import FinanceModule from './FinanceModule';
 import MarginModule from './MarginModule';
 import {
@@ -1243,6 +1244,7 @@ export default function App() {
             { id: 'tempo', l: '⏱ Tempo dne' },
             { id: 'geo', l: '📍 Geografie' },
             { id: 'b2b', l: '🏢 B2B / B2C' },
+            { id: 'ads', l: '📣 Ads' },
             ...(FINANCE_ALLOWED_EMAILS.includes(user?.email || '') ? [{ id: 'finance', l: '💰 Finance' }] : [])
           ].map(t => (
             <button 
@@ -1800,6 +1802,10 @@ export default function App() {
 
           {tab === 'margin' && (
             <MarginModule orders={filtered} dateFrom={dateFrom} dateTo={dateTo} country={country} />
+          )}
+
+          {tab === 'ads' && (
+            <AdsModule supabaseClient={supabase} dateFrom={dateFrom} dateTo={dateTo} country={country} />
           )}
 
           {tab === 'b2b' && (
