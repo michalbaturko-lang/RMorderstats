@@ -35,7 +35,25 @@ const LEVEL_LABELS = {
   asset_group: 'Asset groups',
   hour: 'Hodiny',
   conversion_action: 'Konverzní akce',
+  audience: 'Meta audience',
+  geo: 'Meta geo',
+  placement: 'Meta placement',
 };
+
+const EXPECTED_PROVIDERS = ['google_ads', 'meta_ads'];
+const DETAIL_COVERAGE_LEVELS = [
+  'hour',
+  'ad_group',
+  'ad',
+  'keyword',
+  'search_term',
+  'shopping_product',
+  'asset_group',
+  'conversion_action',
+  'audience',
+  'geo',
+  'placement',
+];
 
 const toNumber = (value) => {
   const number = Number(value || 0);
@@ -49,6 +67,12 @@ const formatRatio = (value) => toNumber(value).toFixed(2).replace('.', ',');
 const formatDate = (value) => {
   const [, month, day] = String(value || '').split('-');
   return month && day ? `${day}.${month}.` : value;
+};
+const formatDateTime = (value) => {
+  if (!value) return 'bez času';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString('cs-CZ', { dateStyle: 'short', timeStyle: 'short' });
 };
 const formatSignedPercent = (value) => `${toNumber(value) > 0 ? '+' : ''}${toNumber(value).toFixed(1)} %`;
 
@@ -257,6 +281,12 @@ function aggregateDetails(rows, level) {
       dimensions.keyword_text,
       dimensions.product_item_id,
       dimensions.product_title,
+      dimensions.publisher_platform,
+      dimensions.platform_position,
+      dimensions.impression_device,
+      dimensions.age,
+      dimensions.gender,
+      dimensions.country,
       dimensions.ad_id,
       dimensions.ad_group_id,
       dimensions.asset_group_id,
@@ -275,6 +305,12 @@ function aggregateDetails(rows, level) {
             ? dimensions.product_title || dimensions.product_item_id || '(bez produktu)'
             : level === 'asset_group'
               ? dimensions.asset_group_name || '(bez asset group)'
+              : level === 'audience'
+                ? [dimensions.age, dimensions.gender].filter(Boolean).join(' / ') || '(bez audience)'
+                : level === 'geo'
+                  ? dimensions.country || '(bez země)'
+                  : level === 'placement'
+                    ? [dimensions.publisher_platform, dimensions.platform_position, dimensions.impression_device].filter(Boolean).join(' / ') || '(bez placementu)'
               : level === 'ad'
                 ? dimensions.ad_name || dimensions.ad_id || '(bez reklamy)'
                 : level === 'ad_group'
@@ -295,7 +331,11 @@ function aggregateDetails(rows, level) {
               ? dimensions.ad_type || dimensions.ad_status
               : level === 'ad_group'
                 ? dimensions.ad_group_type || dimensions.ad_group_status
-                : null;
+                : level === 'geo'
+                  ? dimensions.country
+                  : level === 'placement'
+                    ? dimensions.publisher_platform
+                    : null;
 
       byKey.set(key, {
         key,
@@ -317,6 +357,79 @@ function aggregateDetails(rows, level) {
     .slice(0, 12);
 }
 
+function aggregateProviderCoverage(campaignRows, detailRows, syncRuns) {
+  const byProvider = new Map(EXPECTED_PROVIDERS.map((provider) => [provider, {
+    provider,
+    campaignRows: 0,
+    detailRows: 0,
+    dates: new Set(),
+    lastDataDate: null,
+    latestRun: null,
+    ...emptyMetrics(),
+  }]));
+
+  for (const row of campaignRows) {
+    const target = byProvider.get(row.provider) || {
+      provider: row.provider,
+      campaignRows: 0,
+      detailRows: 0,
+      dates: new Set(),
+      lastDataDate: null,
+      latestRun: null,
+      ...emptyMetrics(),
+    };
+    target.campaignRows += 1;
+    if (row.date) {
+      target.dates.add(row.date);
+      target.lastDataDate = !target.lastDataDate || row.date > target.lastDataDate ? row.date : target.lastDataDate;
+    }
+    addMetrics(target, row);
+    byProvider.set(row.provider, target);
+  }
+
+  for (const row of detailRows) {
+    const target = byProvider.get(row.provider) || {
+      provider: row.provider,
+      campaignRows: 0,
+      detailRows: 0,
+      dates: new Set(),
+      lastDataDate: null,
+      latestRun: null,
+      ...emptyMetrics(),
+    };
+    target.detailRows += 1;
+    byProvider.set(row.provider, target);
+  }
+
+  for (const run of syncRuns) {
+    const target = byProvider.get(run.provider);
+    if (target && !target.latestRun) target.latestRun = run;
+  }
+
+  return Array.from(byProvider.values()).map((row) => ({
+    ...enrichMetrics(row),
+    days: row.dates.size,
+    hasData: row.campaignRows > 0 || row.spend > 0,
+  }));
+}
+
+function aggregateDetailCoverage(rows) {
+  const byLevel = new Map(DETAIL_COVERAGE_LEVELS.map((level) => [level, {
+    level,
+    rows: 0,
+    ...emptyMetrics(),
+  }]));
+
+  for (const row of rows) {
+    const target = byLevel.get(row.level);
+    if (!target) continue;
+    target.rows += 1;
+    addMetrics(target, row);
+  }
+
+  return Array.from(byLevel.values()).map(enrichMetrics);
+}
+
 function insight({ severity = 'info', title, finding, evidence, recommendation, confidence = 'střední' }) {
   return { severity, title, finding, evidence, recommendation, confidence };
 }
@@ -332,6 +445,9 @@ function buildPpcInsights({
   topKeywords,
   topAssetGroups,
   topHours,
+  topAudiences,
+  topGeo,
+  topPlacements,
   daily,
 }) {
   const insights = [];
@@ -537,6 +653,48 @@ function buildPpcInsights({
     }));
   }
 
+  const weakAudience = topAudiences
+    .filter((row) => row.spend >= minSpend && row.roas < 1.2)
+    .sort((a, b) => b.spend - a.spend)[0];
+  if (weakAudience) {
+    insights.push(insight({
+      severity: 'warning',
+      title: 'Meta audience se slabou návratností',
+      finding: 'Audience segment má spend, ale nízkou platformní návratnost.',
+      evidence: `${weakAudience.label}: spend ${formatCurrency(weakAudience.spend)}, ROAS ${formatRatio(weakAudience.roas)}, konverze ${formatNumber(weakAudience.conversions)}.`,
+      recommendation: 'Porovnat věk/pohlaví proti produktovému mixu a AOV. Pokud nosí levné objednávky, oddělit cílení nebo upravit rozpočet.',
+      confidence: 'střední',
+    }));
+  }
+
+  const weakPlacement = topPlacements
+    .filter((row) => row.spend >= minSpend && row.roas < 1.2)
+    .sort((a, b) => b.spend - a.spend)[0];
+  if (weakPlacement) {
+    insights.push(insight({
+      severity: 'warning',
+      title: 'Placement ke kontrole',
+      finding: 'Meta placement utrácí s nízkou návratností.',
+      evidence: `${weakPlacement.label}: spend ${formatCurrency(weakPlacement.spend)}, ROAS ${formatRatio(weakPlacement.roas)}, konverze ${formatNumber(weakPlacement.conversions)}.`,
+      recommendation: 'Prověřit, jestli placement nepřivádí levný provoz bez nákupního intentu. U opakovaného vzoru zvážit rozpad nebo omezení.',
+      confidence: 'nižší',
+    }));
+  }
+
+  const strongGeo = topGeo
+    .filter((row) => row.spend >= minSpend && row.roas > Math.max(total.roas, 1.5))
+    .sort((a, b) => b.conversionValue - a.conversionValue)[0];
+  if (strongGeo) {
+    insights.push(insight({
+      severity: 'info',
+      title: 'Meta geo signál',
+      finding: 'V geo rozpadu je segment s nadprůměrnou návratností.',
+      evidence: `${strongGeo.label}: ROAS ${formatRatio(strongGeo.roas)}, konv. hodnota ${formatCurrency(strongGeo.conversionValue)}, spend ${formatCurrency(strongGeo.spend)}.`,
+      recommendation: 'Sledovat, jestli se geo signál opakuje i v real tržbách a marži. Pak dává smysl řešit rozpočtovou prioritu daného trhu/segmentu.',
+      confidence: 'nižší',
+    }));
+  }
+
   if (orderTotal.missingCostOrders > 0) {
     insights.push(insight({
       severity: 'info',
@@ -620,8 +778,91 @@ function InsightCard({ item }) {
   );
 }
 
+function ProviderCoverageCard({ row }) {
+  const run = row.latestRun;
+  const tone = row.hasData
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+    : 'border-amber-200 bg-amber-50 text-amber-900';
+
+  return (
+    <div className={`rounded-lg border p-3 ${tone}`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-bold">{providerLabel(row.provider)}</div>
+        <StatusBadge value={row.hasData ? 'DATA OK' : 'BEZ DAT'} />
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+        <div>
+          <div className="opacity-70">Spend ve filtru</div>
+          <div className="font-semibold">{formatCurrency(row.spend)}</div>
+        </div>
+        <div>
+          <div className="opacity-70">Dny s daty</div>
+          <div className="font-semibold">{formatNumber(row.days)}</div>
+        </div>
+        <div>
+          <div className="opacity-70">Kampaňové řádky</div>
+          <div className="font-semibold">{formatNumber(row.campaignRows)}</div>
+        </div>
+        <div>
+          <div className="opacity-70">Detailní řádky</div>
+          <div className="font-semibold">{formatNumber(row.detailRows)}</div>
+        </div>
+      </div>
+      <div className="mt-2 text-xs leading-relaxed opacity-80">
+        {run
+          ? `Poslední sync ${run.status}: ${run.range_from} až ${run.range_to}, ${formatNumber(run.rows_upserted)} řádků, ${formatDateTime(run.finished_at || run.started_at)}`
+          : 'Zatím bez uloženého sync běhu.'}
+      </div>
+    </div>
+  );
+}
+
+function DataReadinessPanel({ providerCoverage, detailCoverage, orderTotal }) {
+  const exactShare = orderTotal.orders ? (orderTotal.exactOrders / orderTotal.orders) * 100 : 0;
+  const activeDetails = detailCoverage.filter((row) => row.rows > 0);
+
+  return (
+    <div>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold text-slate-800">Datová připravenost</h3>
+        <div className="text-xs text-slate-500">{formatNumber(activeDetails.length)} detailních vrstev</div>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-3">
+        {providerCoverage.map((row) => (
+          <ProviderCoverageCard key={row.provider} row={row} />
+        ))}
+        <div className={`rounded-lg border p-3 ${exactShare >= 95 ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm font-bold">Maržová přesnost</div>
+            <StatusBadge value={exactShare >= 95 ? 'OK' : 'DOPLNIT'} />
+          </div>
+          <div className="mt-2 text-2xl font-bold">{formatPercent(exactShare)}</div>
+          <div className="mt-1 text-xs opacity-80">
+            {formatNumber(orderTotal.exactOrders)} přesných objednávek z {formatNumber(orderTotal.orders)}.
+            {orderTotal.missingCostOrders > 0 ? ` ${formatNumber(orderTotal.missingCostOrders)} objednávek má chybějící nákupku.` : ''}
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {detailCoverage.map((row) => (
+          <span
+            key={row.level}
+            className={`inline-flex rounded-md border px-2 py-1 text-xs ${
+              row.rows > 0
+                ? 'border-blue-200 bg-blue-50 text-blue-800'
+                : 'border-slate-200 bg-slate-50 text-slate-500'
+            }`}
+          >
+            {LEVEL_LABELS[row.level] || row.level}: {formatNumber(row.rows)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function StatusBadge({ value }) {
-  const active = ['ENABLED', 'SERVING'].includes(String(value || '').toUpperCase());
+  const active = ['ENABLED', 'SERVING', 'OK', 'DATA OK', 'SUCCESS'].includes(String(value || '').toUpperCase());
   const paused = ['PAUSED', 'REMOVED'].includes(String(value || '').toUpperCase());
   const classes = active
     ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
@@ -784,7 +1025,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
           .select('date,provider,market,level,campaign_name,ad_group_name,spend_czk,impressions,clicks,interactions,conversions,conversion_value_czk,dimensions')
           .gte('date', dateFrom)
           .lte('date', dateTo)
-          .in('level', ['hour', 'ad_group', 'ad', 'keyword', 'search_term', 'shopping_product', 'asset_group', 'conversion_action'])
+          .in('level', DETAIL_COVERAGE_LEVELS)
           .order('spend_czk', { ascending: false })
           .range(0, 4999)
       );
@@ -797,7 +1038,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
         .from('ad_sync_runs')
         .select('provider,sync_type,range_from,range_to,status,rows_upserted,warnings,error_message,started_at,finished_at')
         .order('started_at', { ascending: false })
-        .limit(6);
+        .limit(12);
 
       const [campaignMetricResult, detailResult, metaResult, runsResult] = await Promise.all([
         campaignMetricQuery,
@@ -862,6 +1103,11 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
   const topAssetGroups = useMemo(() => aggregateDetails(detailRows, 'asset_group'), [detailRows]);
   const topHours = useMemo(() => aggregateDetails(detailRows, 'hour'), [detailRows]);
   const topConversionActions = useMemo(() => aggregateDetails(detailRows, 'conversion_action'), [detailRows]);
+  const topAudiences = useMemo(() => aggregateDetails(detailRows, 'audience'), [detailRows]);
+  const topGeo = useMemo(() => aggregateDetails(detailRows, 'geo'), [detailRows]);
+  const topPlacements = useMemo(() => aggregateDetails(detailRows, 'placement'), [detailRows]);
+  const providerCoverage = useMemo(() => aggregateProviderCoverage(campaignRows, detailRows, syncRuns), [campaignRows, detailRows, syncRuns]);
+  const detailCoverage = useMemo(() => aggregateDetailCoverage(detailRows), [detailRows]);
   const ppcInsights = useMemo(() => buildPpcInsights({
     total,
     businessTotal,
@@ -873,6 +1119,9 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
     topKeywords,
     topAssetGroups,
     topHours,
+    topAudiences,
+    topGeo,
+    topPlacements,
     daily,
   }), [
     total,
@@ -885,6 +1134,9 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
     topKeywords,
     topAssetGroups,
     topHours,
+    topAudiences,
+    topGeo,
+    topPlacements,
     daily,
   ]);
   const latestRun = syncRuns[0];
@@ -933,6 +1185,8 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
         <Kpi label="PNO" value={formatPercent(businessTotal.pno)} sub="spend / tržby" />
         <Kpi label="Ads vs zisk" value={formatPercent(businessTotal.spendToGrossProfit)} sub={`${formatNumber(orderTotal.missingCostOrders)} obj. bez přesné nákupky`} />
       </div>
+
+      <DataReadinessPanel providerCoverage={providerCoverage} detailCoverage={detailCoverage} orderTotal={orderTotal} />
 
       <div>
         <div className="mb-3 flex items-center justify-between gap-3">
@@ -1027,6 +1281,9 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
         <DetailTable title={LEVEL_LABELS.asset_group} rows={topAssetGroups} />
         <DetailTable title={LEVEL_LABELS.hour} rows={topHours} />
         <DetailTable title={LEVEL_LABELS.conversion_action} rows={topConversionActions} />
+        <DetailTable title={LEVEL_LABELS.audience} rows={topAudiences} />
+        <DetailTable title={LEVEL_LABELS.geo} rows={topGeo} />
+        <DetailTable title={LEVEL_LABELS.placement} rows={topPlacements} />
       </div>
 
       {!!syncRuns.length && (

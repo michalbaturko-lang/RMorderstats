@@ -17,6 +17,14 @@ on:
         description: 'Rolling window for spend refresh'
         required: false
         default: '1'
+      from_date:
+        description: 'Optional campaign-only spend backfill start date YYYY-MM-DD'
+        required: false
+        default: ''
+      to_date:
+        description: 'Optional campaign-only spend backfill end date YYYY-MM-DD'
+        required: false
+        default: ''
 
 concurrency:
   group: ads-spend-${{ github.ref }}
@@ -45,8 +53,8 @@ jobs:
           ADS_SYNC_PROVIDERS: ${{ github.event.inputs.providers || vars.ADS_SPEND_PROVIDERS || 'google_ads,meta_ads' }}
           ADS_SYNC_SKIP_MISSING_SECRETS: '1'
           SYNC_MARKETS: ${{ github.event.inputs.markets || vars.SYNC_MARKETS || '' }}
-          SYNC_FROM_DATE: ''
-          SYNC_TO_DATE: ''
+          SYNC_FROM_DATE: ${{ github.event.inputs.from_date || '' }}
+          SYNC_TO_DATE: ${{ github.event.inputs.to_date || '' }}
           SYNC_DAYS_BACK: ${{ github.event.inputs.days_back || vars.ADS_SPEND_DAYS_BACK || '1' }}
           FX_RATES_JSON: ${{ vars.FX_RATES_JSON || '{"CZK":1,"EUR":25.2,"HUF":0.063,"RON":5.1}' }}
 

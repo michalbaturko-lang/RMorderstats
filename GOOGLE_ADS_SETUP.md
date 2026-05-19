@@ -142,6 +142,8 @@ Workflows:
   - lightweight `campaign` level only
   - refreshes the last 1 day by default
   - intended for current spend and country/market split
+  - supports manual `from_date` / `to_date` backfills for historical spend,
+    still at `campaign` level only
 - `.github/workflows/sync-ads-analytics.yml`
   - once per day
   - deep detail levels
@@ -165,7 +167,9 @@ Quota discipline:
 
 - do not run deep detail sync every 15 minutes
 - use campaign-only sync for frequent spend refreshes
-- run large historical backfills manually in chunks
+- run large historical detail backfills manually in chunks
+- use `Sync Ads Spend` with `from_date` / `to_date` for safer historical spend
+  backfills such as previous month or year-to-date
 - if the developer token has Google Ads API Explorer Access, budget for 2,880
   operations/day and request Basic/Standard access before widening history or
   adding many more accounts
