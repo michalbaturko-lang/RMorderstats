@@ -21,9 +21,6 @@ const PROVIDER_SCRIPTS = {
 const PROVIDER_REQUIRED_ENV = {
   google_ads: [
     'GOOGLE_ADS_DEVELOPER_TOKEN',
-    'GOOGLE_ADS_CLIENT_ID',
-    'GOOGLE_ADS_CLIENT_SECRET',
-    'GOOGLE_ADS_REFRESH_TOKEN',
     'GOOGLE_ADS_ACCOUNTS_JSON',
     'SUPABASE_URL',
     'SUPABASE_SERVICE_ROLE_KEY',
@@ -45,7 +42,24 @@ function parseCsv(value, fallback) {
 }
 
 function missingProviderEnv(provider) {
-  return (PROVIDER_REQUIRED_ENV[provider] || []).filter((name) => !process.env[name]);
+  const missing = (PROVIDER_REQUIRED_ENV[provider] || []).filter((name) => !process.env[name]);
+  if (provider !== 'google_ads') return missing;
+
+  const hasDirectOauth =
+    process.env.GOOGLE_ADS_CLIENT_ID &&
+    process.env.GOOGLE_ADS_CLIENT_SECRET &&
+    process.env.GOOGLE_ADS_REFRESH_TOKEN;
+  const hasBase44Broker =
+    process.env.GOOGLE_ADS_BASE44_APP_ID &&
+    process.env.GOOGLE_ADS_BASE44_ACCESS_TOKEN &&
+    process.env.GOOGLE_ADS_BASE44_TOKEN_ACCOUNT_ID;
+
+  if (hasDirectOauth || hasBase44Broker) return missing;
+
+  return [
+    ...missing,
+    'GOOGLE_ADS_CLIENT_ID/SECRET/REFRESH_TOKEN or GOOGLE_ADS_BASE44_APP_ID/ACCESS_TOKEN/TOKEN_ACCOUNT_ID',
+  ];
 }
 
 function printHelp() {

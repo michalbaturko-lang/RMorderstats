@@ -5,14 +5,13 @@
  *
  * Required env vars:
  * - GOOGLE_ADS_DEVELOPER_TOKEN
- * - GOOGLE_ADS_CLIENT_ID
- * - GOOGLE_ADS_CLIENT_SECRET
- * - GOOGLE_ADS_REFRESH_TOKEN
  * - GOOGLE_ADS_ACCOUNTS_JSON
  * - SUPABASE_URL
  * - SUPABASE_SERVICE_ROLE_KEY
  *
  * Optional env vars:
+ * - GOOGLE_ADS_CLIENT_ID / GOOGLE_ADS_CLIENT_SECRET / GOOGLE_ADS_REFRESH_TOKEN
+ * - GOOGLE_ADS_BASE44_APP_ID / GOOGLE_ADS_BASE44_ACCESS_TOKEN / GOOGLE_ADS_BASE44_TOKEN_ACCOUNT_ID
  * - GOOGLE_ADS_LOGIN_CUSTOMER_ID
  * - GOOGLE_ADS_API_VERSION (default: v23)
  * - GOOGLE_ADS_DETAIL_LEVELS (default: campaign,device,search_term,shopping_product,asset_group)
@@ -46,9 +45,6 @@ import {
 const PROVIDER = 'google_ads';
 const REQUIRED_ENV_VARS = [
   'GOOGLE_ADS_DEVELOPER_TOKEN',
-  'GOOGLE_ADS_CLIENT_ID',
-  'GOOGLE_ADS_CLIENT_SECRET',
-  'GOOGLE_ADS_REFRESH_TOKEN',
   'GOOGLE_ADS_ACCOUNTS_JSON',
   'SUPABASE_URL',
   'SUPABASE_SERVICE_ROLE_KEY',
@@ -66,6 +62,10 @@ function parseLevels() {
 }
 
 async function fetchAccessToken() {
+  if (process.env.GOOGLE_ADS_BASE44_ACCESS_TOKEN) {
+    return fetchBase44AccessToken();
+  }
+
   const body = new URLSearchParams({
     client_id: requireEnv('GOOGLE_ADS_CLIENT_ID'),
     client_secret: requireEnv('GOOGLE_ADS_CLIENT_SECRET'),
@@ -86,6 +86,38 @@ async function fetchAccessToken() {
 
   const json = await response.json();
   if (!json.access_token) throw new Error('OAuth token response did not include access_token');
+  return json.access_token;
+}
+
+async function fetchBase44AccessToken() {
+  const appId = requireEnv('GOOGLE_ADS_BASE44_APP_ID');
+  const base44AccessToken = requireEnv('GOOGLE_ADS_BASE44_ACCESS_TOKEN');
+  const accountId = requireEnv('GOOGLE_ADS_BASE44_TOKEN_ACCOUNT_ID');
+
+  const response = await fetch(`https://base44.app/api/apps/${appId}/functions/googleAdsRefreshToken`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${base44AccessToken}`,
+      'Content-Type': 'application/json',
+      'X-App-Id': appId,
+    },
+    body: JSON.stringify({ accountId }),
+  });
+
+  const text = await response.text();
+  let json;
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    json = {};
+  }
+
+  if (!response.ok || !json.access_token) {
+    const detail = json.error || json.details || text;
+    throw new Error(`Base44 Google Ads token refresh failed (${response.status}): ${detail}`);
+  }
+
   return json.access_token;
 }
 
