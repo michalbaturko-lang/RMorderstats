@@ -16,6 +16,7 @@
     "sync:meta-ads-detail": "node scripts/sync-meta-ads-detail.mjs",
     "sync:ads-costs:all": "SYNC_MARKETS=cz,sk,hu,ro node scripts/sync-google-ads-costs.mjs",
     "sync:ads-costs:ro-backfill": "SYNC_FROM_DATE=2026-03-01 SYNC_MARKETS=ro node scripts/sync-google-ads-costs.mjs",
+    "check:ads-coverage": "node scripts/check-ads-coverage.mjs",
     "verify:ads-readonly": "node scripts/verify-google-ads-readonly.mjs"
   },
   "dependencies": {

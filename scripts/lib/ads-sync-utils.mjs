@@ -156,15 +156,21 @@ export function chunkArray(items, size) {
   return chunks;
 }
 
-export async function supabaseRequest({ supabaseUrl, serviceRoleKey, path, method = 'GET', body, searchParams, prefer }) {
+export async function supabaseRequest({ supabaseUrl, serviceRoleKey, path, method = 'GET', body, searchParams, prefer, headers: extraHeaders = {} }) {
   const endpoint = new URL(path, supabaseUrl);
   for (const [key, value] of Object.entries(searchParams || {})) {
-    if (value !== undefined && value !== null) endpoint.searchParams.set(key, value);
+    if (value === undefined || value === null) continue;
+    if (Array.isArray(value)) {
+      for (const item of value) endpoint.searchParams.append(key, item);
+    } else {
+      endpoint.searchParams.set(key, value);
+    }
   }
 
   const headers = {
     apikey: serviceRoleKey,
     Authorization: `Bearer ${serviceRoleKey}`,
+    ...extraHeaders,
   };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (prefer) headers.Prefer = prefer;

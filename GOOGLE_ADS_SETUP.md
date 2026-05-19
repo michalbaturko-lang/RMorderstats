@@ -149,6 +149,11 @@ Workflows:
   - deep detail levels
   - refreshes the last 3 days by default
   - intended for campaign diagnostics and analytical history
+- `.github/workflows/check-ads-coverage.yml`
+  - manual read-only audit
+  - checks which Ads campaign rows are already in Supabase for a date range
+  - prints spend, real revenue, PNO, real ROAS and gross profit after Ads by
+    provider and market
 
 Current Google Ads detail levels:
 
