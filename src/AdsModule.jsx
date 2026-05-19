@@ -68,6 +68,17 @@ const formatDate = (value) => {
   const [, month, day] = String(value || '').split('-');
   return month && day ? `${day}.${month}.` : value;
 };
+const parseDateKey = (value) => {
+  const [year, month, day] = String(value || '').split('-').map(Number);
+  if (!year || !month || !day) return null;
+  return Date.UTC(year, month - 1, day);
+};
+const inclusiveDayCount = (from, to) => {
+  const start = parseDateKey(from);
+  const end = parseDateKey(to);
+  if (start === null || end === null || end < start) return 0;
+  return Math.floor((end - start) / 86_400_000) + 1;
+};
 const formatDateTime = (value) => {
   if (!value) return 'bez času';
   const date = new Date(value);
@@ -244,22 +255,41 @@ function aggregateDaily(rows, orderByDate) {
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
 }
 
-function aggregateMarkets(rows, orderByMarket) {
+function aggregateMarkets(rows, orderByMarket, dateFrom, dateTo) {
   const byKey = new Map();
+  const expectedDays = inclusiveDayCount(dateFrom, dateTo);
   for (const row of rows) {
     const key = `${row.provider}:${row.market}`;
     if (!byKey.has(key)) {
-      byKey.set(key, { key, provider: row.provider, market: row.market, ...emptyMetrics() });
+      byKey.set(key, {
+        key,
+        provider: row.provider,
+        market: row.market,
+        dates: new Set(),
+        firstDate: null,
+        lastDate: null,
+        expectedDays,
+        ...emptyMetrics(),
+      });
     }
-    addMetrics(byKey.get(key), row);
+    const target = byKey.get(key);
+    if (row.date) {
+      target.dates.add(row.date);
+      target.firstDate = !target.firstDate || row.date < target.firstDate ? row.date : target.firstDate;
+      target.lastDate = !target.lastDate || row.date > target.lastDate ? row.date : target.lastDate;
+    }
+    addMetrics(target, row);
   }
 
   return Array.from(byKey.values())
     .map((row) => {
       const enriched = enrichMetrics(row);
       const orders = orderByMarket.get(row.market) || emptyOrderMetrics();
+      const days = row.dates.size;
       return {
         ...enriched,
+        days,
+        coveragePct: expectedDays ? (days / expectedDays) * 100 : 0,
         realRevenue: orders.revenue,
         exactGrossProfit: orders.exactGrossProfit,
         grossProfitAfterAds: orders.exactGrossProfit - enriched.spend,
@@ -357,12 +387,14 @@ function aggregateDetails(rows, level) {
     .slice(0, 12);
 }
 
-function aggregateProviderCoverage(campaignRows, detailRows, syncRuns) {
+function aggregateProviderCoverage(campaignRows, detailRows, syncRuns, dateFrom, dateTo) {
+  const expectedDays = inclusiveDayCount(dateFrom, dateTo);
   const byProvider = new Map(EXPECTED_PROVIDERS.map((provider) => [provider, {
     provider,
     campaignRows: 0,
     detailRows: 0,
     dates: new Set(),
+    expectedDays,
     lastDataDate: null,
     latestRun: null,
     ...emptyMetrics(),
@@ -374,6 +406,7 @@ function aggregateProviderCoverage(campaignRows, detailRows, syncRuns) {
       campaignRows: 0,
       detailRows: 0,
       dates: new Set(),
+      expectedDays,
       lastDataDate: null,
       latestRun: null,
       ...emptyMetrics(),
@@ -393,6 +426,7 @@ function aggregateProviderCoverage(campaignRows, detailRows, syncRuns) {
       campaignRows: 0,
       detailRows: 0,
       dates: new Set(),
+      expectedDays,
       lastDataDate: null,
       latestRun: null,
       ...emptyMetrics(),
@@ -409,6 +443,7 @@ function aggregateProviderCoverage(campaignRows, detailRows, syncRuns) {
   return Array.from(byProvider.values()).map((row) => ({
     ...enrichMetrics(row),
     days: row.dates.size,
+    coveragePct: expectedDays ? (row.dates.size / expectedDays) * 100 : 0,
     hasData: row.campaignRows > 0 || row.spend > 0,
   }));
 }
@@ -780,15 +815,18 @@ function InsightCard({ item }) {
 
 function ProviderCoverageCard({ row }) {
   const run = row.latestRun;
-  const tone = row.hasData
+  const completeEnough = row.coveragePct >= 95;
+  const tone = row.hasData && completeEnough
     ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+    : row.hasData
+      ? 'border-blue-200 bg-blue-50 text-blue-900'
     : 'border-amber-200 bg-amber-50 text-amber-900';
 
   return (
     <div className={`rounded-lg border p-3 ${tone}`}>
       <div className="flex items-center justify-between gap-3">
         <div className="text-sm font-bold">{providerLabel(row.provider)}</div>
-        <StatusBadge value={row.hasData ? 'DATA OK' : 'BEZ DAT'} />
+        <StatusBadge value={row.hasData ? (completeEnough ? 'DATA OK' : 'ČÁSTEČNÉ') : 'BEZ DAT'} />
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
         <div>
@@ -796,8 +834,8 @@ function ProviderCoverageCard({ row }) {
           <div className="font-semibold">{formatCurrency(row.spend)}</div>
         </div>
         <div>
-          <div className="opacity-70">Dny s daty</div>
-          <div className="font-semibold">{formatNumber(row.days)}</div>
+          <div className="opacity-70">Pokrytí filtru</div>
+          <div className="font-semibold">{formatNumber(row.days)}/{formatNumber(row.expectedDays)} dnů ({formatPercent(row.coveragePct)})</div>
         </div>
         <div>
           <div className="opacity-70">Kampaňové řádky</div>
@@ -1093,7 +1131,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
     spendToGrossProfit: orderTotal.exactGrossProfit ? (total.spend / orderTotal.exactGrossProfit) * 100 : 0,
   }), [orderTotal, total]);
   const daily = useMemo(() => aggregateDaily(dailyRows, orderByDate), [dailyRows, orderByDate]);
-  const markets = useMemo(() => aggregateMarkets(dailyRows, orderByMarket), [dailyRows, orderByMarket]);
+  const markets = useMemo(() => aggregateMarkets(dailyRows, orderByMarket, dateFrom, dateTo), [dailyRows, orderByMarket, dateFrom, dateTo]);
   const campaigns = useMemo(() => aggregateCampaigns(campaignRows, campaignMeta), [campaignRows, campaignMeta]);
   const topAdGroups = useMemo(() => aggregateDetails(detailRows, 'ad_group'), [detailRows]);
   const topAds = useMemo(() => aggregateDetails(detailRows, 'ad'), [detailRows]);
@@ -1106,7 +1144,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
   const topAudiences = useMemo(() => aggregateDetails(detailRows, 'audience'), [detailRows]);
   const topGeo = useMemo(() => aggregateDetails(detailRows, 'geo'), [detailRows]);
   const topPlacements = useMemo(() => aggregateDetails(detailRows, 'placement'), [detailRows]);
-  const providerCoverage = useMemo(() => aggregateProviderCoverage(campaignRows, detailRows, syncRuns), [campaignRows, detailRows, syncRuns]);
+  const providerCoverage = useMemo(() => aggregateProviderCoverage(campaignRows, detailRows, syncRuns, dateFrom, dateTo), [campaignRows, detailRows, syncRuns, dateFrom, dateTo]);
   const detailCoverage = useMemo(() => aggregateDetailCoverage(detailRows), [detailRows]);
   const ppcInsights = useMemo(() => buildPpcInsights({
     total,
@@ -1231,6 +1269,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-3 py-2 text-left">Zdroj / trh</th>
+                <th className="px-3 py-2 text-left">Pokrytí</th>
                 <th className="px-3 py-2 text-right">Spend</th>
                 <th className="px-3 py-2 text-right">Konv. hodnota</th>
                 <th className="px-3 py-2 text-right">ROAS</th>
@@ -1246,6 +1285,12 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
               {markets.map((row) => (
                 <tr key={row.key} className="hover:bg-slate-50">
                   <td className="px-3 py-2 font-semibold text-slate-800">{providerLabel(row.provider)} / {marketLabel(row.market)}</td>
+                  <td className="px-3 py-2 text-xs text-slate-600">
+                    <div className={`font-semibold ${row.coveragePct >= 95 ? 'text-emerald-700' : row.coveragePct > 0 ? 'text-blue-700' : 'text-amber-700'}`}>
+                      {formatNumber(row.days)}/{formatNumber(row.expectedDays)} dnů · {formatPercent(row.coveragePct)}
+                    </div>
+                    <div className="text-slate-400">{row.firstDate || 'bez dat'} až {row.lastDate || 'bez dat'}</div>
+                  </td>
                   <td className="px-3 py-2 text-right text-red-700 font-semibold">{formatCurrency(row.spend)}</td>
                   <td className="px-3 py-2 text-right text-emerald-700 font-semibold">{formatCurrency(row.conversionValue)}</td>
                   <td className="px-3 py-2 text-right font-bold text-slate-800">{formatRatio(row.roas)}</td>
@@ -1259,7 +1304,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
               ))}
               {!markets.length && (
                 <tr>
-                  <td colSpan={10} className="px-3 py-4 text-center text-slate-500">Pro zvolené období nejsou Ads data.</td>
+                  <td colSpan={11} className="px-3 py-4 text-center text-slate-500">Pro zvolené období nejsou Ads data.</td>
                 </tr>
               )}
             </tbody>
