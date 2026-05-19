@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import FinanceModule from './FinanceModule';
+import MarginModule from './MarginModule';
 import {
   Bar,
   CartesianGrid,
@@ -1238,6 +1239,7 @@ export default function App() {
         <div className="flex gap-1 bg-white p-1 rounded-xl shadow-sm border mb-4">
           {[
             { id: 'heatmap', l: '🗓️ Časová analýza' },
+            { id: 'margin', l: '📈 Marže' },
             { id: 'tempo', l: '⏱ Tempo dne' },
             { id: 'geo', l: '📍 Geografie' },
             { id: 'b2b', l: '🏢 B2B / B2C' },
@@ -1794,6 +1796,10 @@ export default function App() {
 
           {tab === 'finance' && FINANCE_ALLOWED_EMAILS.includes(user?.email || '') && (
             <FinanceModule supabaseUrl={SUPABASE_URL} supabaseKey={SUPABASE_KEY} userEmail={user?.email} />
+          )}
+
+          {tab === 'margin' && (
+            <MarginModule orders={filtered} dateFrom={dateFrom} dateTo={dateTo} country={country} />
           )}
 
           {tab === 'b2b' && (
