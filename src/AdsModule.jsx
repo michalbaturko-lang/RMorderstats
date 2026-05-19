@@ -54,6 +54,7 @@ const DETAIL_COVERAGE_LEVELS = [
   'geo',
   'placement',
 ];
+const DETAIL_LEVEL_ROW_LIMIT = 700;
 
 const toNumber = (value) => {
   const number = Number(value || 0);
@@ -1091,16 +1092,16 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
           .range(0, 9999)
       );
 
-      const detailQuery = applyMarket(
+      const detailQueries = DETAIL_COVERAGE_LEVELS.map((level) => applyMarket(
         supabaseClient
           .from('ad_metrics_daily')
           .select('date,provider,market,level,campaign_name,ad_group_name,spend_czk,impressions,clicks,interactions,conversions,conversion_value_czk,dimensions')
           .gte('date', dateFrom)
           .lte('date', dateTo)
-          .in('level', DETAIL_COVERAGE_LEVELS)
+          .eq('level', level)
           .order('spend_czk', { ascending: false })
-          .range(0, 4999)
-      );
+          .range(0, DETAIL_LEVEL_ROW_LIMIT - 1)
+      ));
 
       const metaQuery = country && country !== 'all'
         ? supabaseClient.from('ad_campaigns').select('*').eq('market', country).range(0, 999)
@@ -1112,20 +1113,20 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
         .order('started_at', { ascending: false })
         .limit(12);
 
-      const [campaignMetricResult, detailResult, metaResult, runsResult] = await Promise.all([
+      const [campaignMetricResult, metaResult, runsResult, ...detailResults] = await Promise.all([
         campaignMetricQuery,
-        detailQuery,
         metaQuery,
         runsQuery,
+        ...detailQueries,
       ]);
 
-      const firstError = [campaignMetricResult, detailResult, metaResult, runsResult].find((result) => result.error)?.error;
+      const firstError = [campaignMetricResult, metaResult, runsResult, ...detailResults].find((result) => result.error)?.error;
       if (firstError) throw firstError;
 
       if (!cancelled) {
         setDailyRows(campaignMetricResult.data || []);
         setCampaignRows(campaignMetricResult.data || []);
-        setDetailRows(detailResult.data || []);
+        setDetailRows(detailResults.flatMap((result) => result.data || []));
         setCampaignMetaRows(metaResult.data || []);
         setSyncRuns(runsResult.data || []);
       }
