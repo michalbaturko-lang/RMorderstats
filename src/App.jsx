@@ -224,6 +224,80 @@ const KPICard = ({ title, value, icon, sub }) => (
   </div>
 );
 
+const emptyAdsSummary = () => ({
+  loading: true,
+  error: '',
+  rows: 0,
+  spend: 0,
+  clicks: 0,
+  conversions: 0,
+  conversionValue: 0,
+  providers: [],
+  markets: [],
+  firstDate: '',
+  lastDate: '',
+});
+
+const AdsKpiStrip = ({ summary, revenue, onOpenAds }) => {
+  const pno = revenue ? (summary.spend / revenue) * 100 : 0;
+  const realRoas = summary.spend ? revenue / summary.spend : 0;
+  const platformRoas = summary.spend ? summary.conversionValue / summary.spend : 0;
+  const hasData = summary.rows > 0 || summary.spend > 0;
+  const hasMeta = summary.providers.includes('meta_ads');
+
+  return (
+    <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/70 p-3 shadow-sm">
+      <div className="mb-2 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <div className="text-sm font-semibold text-slate-800">📣 Reklamy ve vybraném období</div>
+          <div className="text-xs text-slate-500">
+            {summary.loading
+              ? 'Načítám Ads spend ze Supabase…'
+              : summary.error
+                ? summary.error
+                : hasData
+                  ? `${summary.firstDate || 'bez data'} až ${summary.lastDate || 'bez data'} · ${summary.providers.map(p => p === 'google_ads' ? 'Google Ads' : 'Meta Ads').join(', ')}`
+                  : 'Pro filtr zatím nejsou campaign Ads data.'}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onOpenAds}
+          className="self-start rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-700 shadow-sm hover:border-amber-400 hover:bg-amber-100 md:self-auto"
+        >
+          Otevřít Reklamy
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+        <div>
+          <div className="text-xs text-slate-500">Spend</div>
+          <div className="text-xl font-bold text-red-700">{summary.loading ? '…' : formatCurrency(summary.spend)}</div>
+        </div>
+        <div>
+          <div className="text-xs text-slate-500">PNO</div>
+          <div className="text-xl font-bold text-slate-800">{summary.loading ? '…' : formatPercent(pno)}</div>
+        </div>
+        <div>
+          <div className="text-xs text-slate-500">Real ROAS</div>
+          <div className="text-xl font-bold text-blue-700">{summary.loading ? '…' : realRoas.toFixed(2).replace('.', ',')}</div>
+        </div>
+        <div>
+          <div className="text-xs text-slate-500">Platform ROAS</div>
+          <div className="text-xl font-bold text-emerald-700">{summary.loading ? '…' : platformRoas.toFixed(2).replace('.', ',')}</div>
+        </div>
+        <div>
+          <div className="text-xs text-slate-500">Pokrytí</div>
+          <div className="text-sm font-semibold text-slate-700">
+            {summary.loading ? '…' : `${formatNumber(summary.rows)} campaign řádků`}
+          </div>
+          <div className="text-xs text-slate-500">{hasMeta ? 'Google + Meta' : 'Meta čeká na přístup'}</div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const Heatmap = ({ data, metric, onClick, groupDays, activeDays }) => {
   const [hoveredCell, setHoveredCell] = useState(null);
 
@@ -544,6 +618,7 @@ export default function App() {
   const [loadingMessage, setLoadingMessage] = useState(LOADING_MESSAGES[0]);
   const [dateFrom, setDateFrom] = useState(() => formatDateForInput(new Date()));
   const [dateTo, setDateTo] = useState(() => formatDateForInput(new Date()));
+  const [adsSummary, setAdsSummary] = useState(() => emptyAdsSummary());
 
   // Auth: listen for session changes
   useEffect(() => {
@@ -661,6 +736,68 @@ export default function App() {
       })
       .catch(e => { setError(e.message); setLoading(false); });
   }, [dateFrom, dateTo]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchAdsSummary() {
+      if (!user) {
+        setAdsSummary({ ...emptyAdsSummary(), loading: false });
+        return;
+      }
+
+      setAdsSummary(emptyAdsSummary());
+
+      try {
+        let query = supabase
+          .from('ad_metrics_daily')
+          .select('date,provider,market,spend_czk,clicks,conversions,conversion_value_czk')
+          .gte('date', dateFrom)
+          .lte('date', dateTo)
+          .eq('level', 'campaign')
+          .range(0, 9999);
+
+        if (country !== 'all') query = query.eq('market', country);
+
+        const { data, error: adsError } = await query;
+        if (adsError) throw adsError;
+        if (cancelled) return;
+
+        const rows = Array.isArray(data) ? data : [];
+        const providers = [...new Set(rows.map(row => row.provider).filter(Boolean))].sort();
+        const markets = [...new Set(rows.map(row => row.market).filter(Boolean))].sort();
+        const dates = rows.map(row => row.date).filter(Boolean).sort();
+
+        setAdsSummary({
+          loading: false,
+          error: '',
+          rows: rows.length,
+          spend: rows.reduce((sum, row) => sum + Number(row.spend_czk || 0), 0),
+          clicks: rows.reduce((sum, row) => sum + Number(row.clicks || 0), 0),
+          conversions: rows.reduce((sum, row) => sum + Number(row.conversions || 0), 0),
+          conversionValue: rows.reduce((sum, row) => sum + Number(row.conversion_value_czk || 0), 0),
+          providers,
+          markets,
+          firstDate: dates[0] || '',
+          lastDate: dates[dates.length - 1] || '',
+        });
+      } catch (err) {
+        if (!cancelled) {
+          setAdsSummary({
+            ...emptyAdsSummary(),
+            loading: false,
+            error: `Ads souhrn se nepodařilo načíst: ${err.message || 'neznámá chyba'}`,
+          });
+        }
+      }
+    }
+
+    fetchAdsSummary();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, dateFrom, dateTo, country]);
 
   const filtered = useMemo(() => country === 'all' ? orders : orders.filter(o => o.market === country), [orders, country]);
 
@@ -1235,6 +1372,8 @@ export default function App() {
           <KPICard title="Ø Objednávka" value={formatCurrency(kpis.aov)} icon="📦" />
           <KPICard title="B2B podíl" value={`${kpis.b2bPct.toFixed(0)}%`} icon="🏢" sub={`🏙️ Velká města: ${kpis.bigPct.toFixed(0)}%`} />
         </div>
+
+        <AdsKpiStrip summary={adsSummary} revenue={kpis.revenue} onOpenAds={() => setTab('ads')} />
 
         {/* Tabs */}
         <div className="flex gap-1 bg-white p-1 rounded-xl shadow-sm border mb-4">
