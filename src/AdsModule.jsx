@@ -461,7 +461,9 @@ function aggregateDetails(rows, level) {
               : level === 'ad_group'
                 ? dimensions.ad_group_type || dimensions.ad_group_status
                 : level === 'geo'
-                  ? dimensions.location_type || dimensions.country || dimensions.geo_target_country
+                  ? dimensions.targeting_location !== null && dimensions.targeting_location !== undefined
+                    ? (dimensions.targeting_location ? 'targetovaná lokace' : 'uživatelská lokace')
+                    : dimensions.country || dimensions.geo_target_country
                   : level === 'placement'
                     ? dimensions.publisher_platform
                     : null;

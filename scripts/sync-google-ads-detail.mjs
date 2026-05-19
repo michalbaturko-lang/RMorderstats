@@ -456,8 +456,8 @@ function geoQuery(from, to) {
     '  customer.currency_code,',
     '  campaign.id,',
     '  campaign.name,',
-    '  geographic_view.country_criterion_id,',
-    '  geographic_view.location_type,',
+    '  user_location_view.country_criterion_id,',
+    '  user_location_view.targeting_location,',
     '  metrics.cost_micros,',
     '  metrics.impressions,',
     '  metrics.clicks,',
@@ -469,7 +469,7 @@ function geoQuery(from, to) {
     '  metrics.conversions_value,',
     '  metrics.all_conversions,',
     '  metrics.all_conversions_value',
-    'FROM geographic_view',
+    'FROM user_location_view',
     `WHERE segments.date BETWEEN '${from}' AND '${to}'`,
     'ORDER BY segments.date, campaign.id, metrics.cost_micros DESC',
   ].join('\n');
@@ -697,8 +697,8 @@ function dimensionsForLevel(level, row) {
   }
   if (level === 'geo') {
     return {
-      country_criterion_id: row.geographicView?.countryCriterionId ? String(row.geographicView.countryCriterionId) : null,
-      location_type: row.geographicView?.locationType || null,
+      country_criterion_id: row.userLocationView?.countryCriterionId ? String(row.userLocationView.countryCriterionId) : null,
+      targeting_location: row.userLocationView?.targetingLocation ?? null,
       geo_target_country: row.segments?.geoTargetCountry || null,
       geo_target_region: row.segments?.geoTargetRegion || null,
       geo_target_city: row.segments?.geoTargetCity || null,
