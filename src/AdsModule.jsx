@@ -388,6 +388,33 @@ function aggregateMarketsFromBusinessRows(rows, dateFrom, dateTo) {
     .sort((a, b) => b.spend - a.spend);
 }
 
+function formatGeoTarget(value, prefix) {
+  if (value === null || value === undefined || value === '') return '';
+  const text = String(value);
+  const match = text.match(/geoTargetConstants\/(\d+)/i);
+  if (/^\d+$/.test(text)) return `${prefix} ${text}`;
+  return match ? `${prefix} ${match[1]}` : text;
+}
+
+function geoDetailLabel(dimensions) {
+  const candidates = [
+    ['Lokace', dimensions.geo_target_most_specific_location],
+    ['Město', dimensions.geo_target_city],
+    ['Region', dimensions.geo_target_region],
+    ['Země', dimensions.geo_target_country || dimensions.country || dimensions.country_criterion_id],
+  ];
+  const [prefix, value] = candidates.find(([, value]) => value !== null && value !== undefined && value !== '') || [];
+  return value ? formatGeoTarget(value, prefix) : '(bez geo)';
+}
+
+function geoDetailSubLabel(dimensions) {
+  const locationMode = dimensions.targeting_location !== null && dimensions.targeting_location !== undefined
+    ? (dimensions.targeting_location ? 'targetovaná lokace' : 'uživatelská lokace')
+    : null;
+  const country = dimensions.country_criterion_id ? formatGeoTarget(dimensions.country_criterion_id, 'země') : null;
+  return [locationMode, country].filter(Boolean).join(' · ') || null;
+}
+
 function aggregateDetails(rows, level) {
   const byKey = new Map();
   const levelRows = rows.filter((row) => row.level === level);
@@ -431,13 +458,7 @@ function aggregateDetails(rows, level) {
               : level === 'audience'
                 ? [dimensions.age, dimensions.gender].filter(Boolean).join(' / ') || '(bez audience)'
                 : level === 'geo'
-                  ? dimensions.geo_target_most_specific_location
-                    || dimensions.geo_target_city
-                    || dimensions.geo_target_region
-                    || dimensions.geo_target_country
-                    || dimensions.country
-                    || dimensions.country_criterion_id
-                    || '(bez geo)'
+                  ? geoDetailLabel(dimensions)
                   : level === 'placement'
                     ? [dimensions.publisher_platform, dimensions.platform_position, dimensions.impression_device].filter(Boolean).join(' / ') || '(bez placementu)'
               : level === 'ad'
@@ -461,9 +482,7 @@ function aggregateDetails(rows, level) {
               : level === 'ad_group'
                 ? dimensions.ad_group_type || dimensions.ad_group_status
                 : level === 'geo'
-                  ? dimensions.targeting_location !== null && dimensions.targeting_location !== undefined
-                    ? (dimensions.targeting_location ? 'targetovaná lokace' : 'uživatelská lokace')
-                    : dimensions.country || dimensions.geo_target_country
+                  ? geoDetailSubLabel(dimensions)
                   : level === 'placement'
                     ? dimensions.publisher_platform
                     : null;
@@ -847,6 +866,20 @@ function buildPpcInsights({
       finding: 'Meta placement utrácí s nízkou návratností.',
       evidence: `${weakPlacement.label}: spend ${formatCurrency(weakPlacement.spend)}, ROAS ${formatRatio(weakPlacement.roas)}, konverze ${formatNumber(weakPlacement.conversions)}.`,
       recommendation: 'Prověřit, jestli placement nepřivádí levný provoz bez nákupního intentu. U opakovaného vzoru zvážit rozpad nebo omezení.',
+      confidence: 'nižší',
+    }));
+  }
+
+  const weakGeo = topGeo
+    .filter((row) => row.spend >= minSpend && row.roas < Math.max(total.roas * 0.5, 1.1))
+    .sort((a, b) => b.spend - a.spend)[0];
+  if (weakGeo) {
+    insights.push(insight({
+      severity: 'warning',
+      title: 'Geo segment ke kontrole',
+      finding: 'Geo segment utrácí s podprůměrnou návratností vůči celku.',
+      evidence: `${weakGeo.label}: spend ${formatCurrency(weakGeo.spend)}, ROAS ${formatRatio(weakGeo.roas)}, konverze ${formatNumber(weakGeo.conversions)}.`,
+      recommendation: 'Prověřit, jestli sem nejde nízkohodnotný provoz nebo špatný produktový mix. Pokud se vzor opakuje, řešit oddělené vyhodnocení lokace před úpravou rozpočtu.',
       confidence: 'nižší',
     }));
   }
