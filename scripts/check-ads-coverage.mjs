@@ -56,6 +56,24 @@ function getOrderMarket(order) {
   return String(order.market || order.raw_data?.language_id || 'unknown').toLowerCase();
 }
 
+function getOrderDedupeKey(order) {
+  return order.raw_data?.order_number || order.raw_data?.number || order.id;
+}
+
+function deduplicateOrders(rows) {
+  const seen = new Set();
+  const deduped = [];
+
+  for (const order of rows) {
+    const key = getOrderDedupeKey(order);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(order);
+  }
+
+  return deduped;
+}
+
 function isCancelled(order) {
   const status = String(order.status || '').toUpperCase();
   const rawStatus = String(order.raw_data?.status || '').toUpperCase();
@@ -182,9 +200,14 @@ function buildAdSummary(rows) {
 
 function buildOrderSummary(rows, fxRates, from, to, marketFilter) {
   const summary = new Map();
+  const dedupedRows = deduplicateOrders(rows);
+  let cancelledRows = 0;
 
-  for (const order of rows) {
-    if (isCancelled(order)) continue;
+  for (const order of dedupedRows) {
+    if (isCancelled(order)) {
+      cancelledRows += 1;
+      continue;
+    }
     const date = dateOnly(order.order_date || order.created_at);
     if (!date || date < from || date > to) continue;
     const market = getOrderMarket(order);
@@ -195,11 +218,26 @@ function buildOrderSummary(rows, fxRates, from, to, marketFilter) {
     addOrderMetrics(summary.get(key), order, fxRates);
   }
 
-  return summary;
+  return {
+    summary,
+    stats: {
+      sourceRows: rows.length,
+      deduplicatedRows: dedupedRows.length,
+      duplicateRows: rows.length - dedupedRows.length,
+      cancelledRows,
+    },
+  };
 }
 
-function printCoverage({ from, to, adSummary, orderSummary }) {
+function printCoverage({ from, to, adSummary, orderSummary, orderStats }) {
   console.log(`[check-ads-coverage] Range: ${from} -> ${to}`);
+  console.log([
+    '[check-ads-coverage] Orders',
+    `source_rows=${formatNumber(orderStats.sourceRows)}`,
+    `deduped=${formatNumber(orderStats.deduplicatedRows)}`,
+    `duplicates_removed=${formatNumber(orderStats.duplicateRows)}`,
+    `cancelled_removed=${formatNumber(orderStats.cancelledRows)}`,
+  ].join(' | '));
   if (!adSummary.length) {
     console.log('[check-ads-coverage] No campaign Ads rows found for this filter.');
     return;
@@ -262,13 +300,13 @@ async function main() {
       table: 'orders',
       select: 'id,order_date,created_at,market,currency,status,raw_data',
       filters: orderFilters,
-      orderBy: 'order_date.asc',
+      orderBy: 'order_date.desc',
     }),
   ]);
 
   const adSummary = buildAdSummary(adRows);
-  const orderSummary = buildOrderSummary(orderRows, fxRates, from, to, marketFilter);
-  printCoverage({ from, to, adSummary, orderSummary });
+  const { summary: orderSummary, stats: orderStats } = buildOrderSummary(orderRows, fxRates, from, to, marketFilter);
+  printCoverage({ from, to, adSummary, orderSummary, orderStats });
 
   if (requireData && !adRows.length) {
     throw new Error('Required Ads coverage data is missing for the selected filter.');

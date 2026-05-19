@@ -154,6 +154,8 @@ Workflows:
   - checks which Ads campaign rows are already in Supabase for a date range
   - prints spend, real revenue, PNO, real ROAS and gross profit after Ads by
     provider and market
+  - uses the same order hygiene as the dashboard: deduplicate orders first,
+    then remove cancelled/STORNO orders before revenue and margin comparison
 
 Current Google Ads detail levels:
 
