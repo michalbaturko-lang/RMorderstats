@@ -41,6 +41,8 @@ Run these SQL scripts in Supabase SQL editor:
 
 - `supabase/ad_costs_daily.sql` for the old cost-only table
 - `supabase/ad_marketing_analytics.sql` for the detailed model
+- `supabase/ad_business_analytics_views.sql` for reusable business views that
+  join Ads spend with deduplicated non-cancelled order revenue and exact margin
 
 The detailed schema creates:
 
@@ -53,10 +55,18 @@ The detailed schema creates:
 - `ad_sync_runs`
 - `marketing_daily_summary`
 - `marketing_campaign_daily_summary`
+- `order_business_daily_summary`
+- `marketing_business_provider_daily_summary`
+- `marketing_business_daily_total`
 
 Detailed dimensions such as search term, product, device, audience, geo and
 placement are stored in `ad_metrics_daily.dimensions` and the full source row is
 kept in `ad_raw_insights`.
+
+The business views use the same order hygiene as the dashboard and coverage
+audit: deduplicate orders by order number/id, exclude `STORNO`, calculate product
+revenue without VAT/shipping from `raw_data.products[].price_without_vat`, and
+use exact gross profit only when every product in the order has `buy_price`.
 
 ## 3) Configure Secrets
 
