@@ -25,6 +25,14 @@ on:
         description: 'Rolling detail window when from/to is empty'
         required: false
         default: '3'
+      google_detail_levels:
+        description: 'Optional Google detail levels, for example geo or campaign,geo'
+        required: false
+        default: ''
+      meta_detail_levels:
+        description: 'Optional Meta detail levels, for example campaign,adset,ad'
+        required: false
+        default: ''
 
 concurrency:
   group: ads-detail-${{ github.ref }}
@@ -71,9 +79,9 @@ jobs:
           GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${{ secrets.GOOGLE_ADS_LOGIN_CUSTOMER_ID }}
           GOOGLE_ADS_ACCOUNTS_JSON: ${{ secrets.GOOGLE_ADS_ACCOUNTS_JSON }}
           GOOGLE_ADS_API_VERSION: ${{ vars.GOOGLE_ADS_API_VERSION || 'v23' }}
-          GOOGLE_ADS_DETAIL_LEVELS: ${{ vars.GOOGLE_ADS_DETAIL_LEVELS || 'campaign,device,hour,ad_group,ad,keyword,search_term,shopping_product,asset_group,geo,conversion_action' }}
+          GOOGLE_ADS_DETAIL_LEVELS: ${{ github.event.inputs.google_detail_levels || vars.GOOGLE_ADS_DETAIL_LEVELS || 'campaign,device,hour,ad_group,ad,keyword,search_term,shopping_product,asset_group,geo,conversion_action' }}
 
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
           META_ADS_ACCOUNTS_JSON: ${{ secrets.META_ADS_ACCOUNTS_JSON }}
           META_GRAPH_API_VERSION: ${{ vars.META_GRAPH_API_VERSION || 'v24.0' }}
-          META_ADS_DETAIL_LEVELS: ${{ vars.META_ADS_DETAIL_LEVELS || 'campaign,adset,ad,audience,geo,placement' }}
+          META_ADS_DETAIL_LEVELS: ${{ github.event.inputs.meta_detail_levels || vars.META_ADS_DETAIL_LEVELS || 'campaign,adset,ad,audience,geo,placement' }}

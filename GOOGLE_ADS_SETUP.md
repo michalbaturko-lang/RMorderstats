@@ -165,6 +165,10 @@ Workflows:
   - deep detail levels
   - refreshes the last 3 days by default
   - intended for campaign diagnostics and analytical history
+  - supports manual narrow backfills with `google_detail_levels` and
+    `meta_detail_levels`, for example `google_detail_levels=geo` with a
+    historical `from_date` / `to_date` to avoid re-fetching every expensive
+    diagnostic layer
 - `.github/workflows/check-meta-ads-readiness.yml`
   - manual read-only Meta API preflight before the first import
   - validates `META_ACCESS_TOKEN`, `META_ADS_ACCOUNTS_JSON`, account metadata,
@@ -210,8 +214,10 @@ Workflows:
   - defaults to yesterday UTC, provider `google_ads` and markets `cz,sk,hu,ro`
   - fails if the latest deep detail sync is stale/missing or if any expected
     market has no rows for required levels such as `device`, `hour`,
-    `ad_group`, `ad`, `keyword`, `search_term`, `shopping_product` and
+    `ad_group`, `ad`, `keyword`, `search_term`, `shopping_product`, `geo` and
     `conversion_action`
+  - supports manual `required_sync_levels` / `required_row_levels`, for example
+    `geo` after a geo-only historical backfill
   - keep provider default as `google_ads`; add `meta_ads` only after Meta
     secrets, first Meta detail backfill and provider-specific level settings
     exist

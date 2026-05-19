@@ -25,6 +25,14 @@ on:
         description: 'Fail if any required detail level has no rows for any expected market'
         required: false
         default: '1'
+      required_sync_levels:
+        description: 'Required levels in the latest matching detail sync run'
+        required: false
+        default: ''
+      required_row_levels:
+        description: 'Required levels with rows for the monitored date'
+        required: false
+        default: ''
 
 jobs:
   check:
@@ -53,5 +61,5 @@ jobs:
           ADS_DETAIL_HEALTH_DATE: ${{ github.event.inputs.health_date || '' }}
           ADS_DETAIL_HEALTH_MAX_SYNC_AGE_MINUTES: ${{ github.event.inputs.max_sync_age_minutes || vars.ADS_DETAIL_HEALTH_MAX_SYNC_AGE_MINUTES || '2160' }}
           ADS_DETAIL_HEALTH_REQUIRE_LEVEL_ROWS: ${{ github.event.inputs.require_level_rows || vars.ADS_DETAIL_HEALTH_REQUIRE_LEVEL_ROWS || '1' }}
-          ADS_DETAIL_HEALTH_REQUIRED_SYNC_LEVELS: ${{ vars.ADS_DETAIL_HEALTH_REQUIRED_SYNC_LEVELS || 'campaign,device,hour,ad_group,ad,keyword,search_term,shopping_product,geo,conversion_action' }}
-          ADS_DETAIL_HEALTH_REQUIRED_ROW_LEVELS: ${{ vars.ADS_DETAIL_HEALTH_REQUIRED_ROW_LEVELS || 'device,hour,ad_group,ad,keyword,search_term,shopping_product,geo,conversion_action' }}
+          ADS_DETAIL_HEALTH_REQUIRED_SYNC_LEVELS: ${{ github.event.inputs.required_sync_levels || vars.ADS_DETAIL_HEALTH_REQUIRED_SYNC_LEVELS || 'campaign,device,hour,ad_group,ad,keyword,search_term,shopping_product,geo,conversion_action' }}
+          ADS_DETAIL_HEALTH_REQUIRED_ROW_LEVELS: ${{ github.event.inputs.required_row_levels || vars.ADS_DETAIL_HEALTH_REQUIRED_ROW_LEVELS || 'device,hour,ad_group,ad,keyword,search_term,shopping_product,geo,conversion_action' }}
