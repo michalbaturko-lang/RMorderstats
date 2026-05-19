@@ -45,6 +45,8 @@ jobs:
 
       - run: npm ci
 
+      - run: npm run verify:ads-readonly
+
       - name: Sync detailed marketing ads analytics
         run: npm run sync:ads-analytics
         env:

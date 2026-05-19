@@ -9,6 +9,10 @@ Use the detailed sync for diagnosing why average order value drops. It writes
 read-only platform data into Supabase; it does not edit campaigns, bids, budgets,
 ads, products, or audiences.
 
+Read-only rule: Google Ads scripts may call only reporting/search endpoints
+(`googleAds:searchStream`). They must not call any Google Ads mutate endpoint.
+Both Ads workflows run `npm run verify:ads-readonly` before syncing.
+
 ## 1) Required Access
 
 Google Ads API:

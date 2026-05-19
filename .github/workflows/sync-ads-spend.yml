@@ -37,6 +37,8 @@ jobs:
 
       - run: npm ci
 
+      - run: npm run verify:ads-readonly
+
       - name: Sync current ads spend
         run: npm run sync:ads-analytics
         env:
