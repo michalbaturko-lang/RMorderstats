@@ -77,11 +77,25 @@ const parseDateKey = (value) => {
   if (!year || !month || !day) return null;
   return Date.UTC(year, month - 1, day);
 };
+const formatDateKey = (timestamp) => new Date(timestamp).toISOString().slice(0, 10);
 const inclusiveDayCount = (from, to) => {
   const start = parseDateKey(from);
   const end = parseDateKey(to);
   if (start === null || end === null || end < start) return 0;
   return Math.floor((end - start) / 86_400_000) + 1;
+};
+const addDays = (value, days) => {
+  const timestamp = parseDateKey(value);
+  if (timestamp === null) return null;
+  return formatDateKey(timestamp + days * 86_400_000);
+};
+const previousDateRange = (from, to) => {
+  const days = inclusiveDayCount(from, to);
+  if (!days) return null;
+  const previousTo = addDays(from, -1);
+  const previousFrom = addDays(from, -days);
+  if (!previousFrom || !previousTo) return null;
+  return { from: previousFrom, to: previousTo, days };
 };
 const formatDateTime = (value) => {
   if (!value) return 'bez času';
@@ -99,6 +113,16 @@ const formatAgeMinutes = (value) => Number.isFinite(value)
   ? `${toNumber(value).toFixed(1).replace('.', ',')} min`
   : 'bez syncu';
 const formatSignedPercent = (value) => `${toNumber(value) > 0 ? '+' : ''}${toNumber(value).toFixed(1)} %`;
+const formatSignedPercentagePoints = (value) => `${toNumber(value) > 0 ? '+' : ''}${toNumber(value).toFixed(1)} p. b.`;
+const relativeChange = (current, previous) => {
+  const prev = toNumber(previous);
+  if (!prev) return null;
+  return ((toNumber(current) - prev) / Math.abs(prev)) * 100;
+};
+const formatRelativeChange = (current, previous) => {
+  const change = relativeChange(current, previous);
+  return change === null ? 'bez srovnání' : formatSignedPercent(change);
+};
 const isMissingViewError = (error) => {
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
   return /PGRST205|PGRST204|schema cache|could not find|relation .* does not exist/i.test(text);
@@ -409,6 +433,45 @@ function aggregateMarketsFromBusinessRows(rows, dateFrom, dateTo) {
     .sort((a, b) => b.spend - a.spend);
 }
 
+function aggregateAdMarkets(rows, dateFrom, dateTo) {
+  const byKey = new Map();
+  const expectedDays = inclusiveDayCount(dateFrom, dateTo);
+  for (const row of rows) {
+    const key = `${row.provider}:${row.market}`;
+    if (!byKey.has(key)) {
+      byKey.set(key, {
+        key,
+        provider: row.provider,
+        market: row.market,
+        dates: new Set(),
+        firstDate: null,
+        lastDate: null,
+        expectedDays,
+        ...emptyMetrics(),
+      });
+    }
+    const target = byKey.get(key);
+    if (row.date) {
+      target.dates.add(row.date);
+      target.firstDate = !target.firstDate || row.date < target.firstDate ? row.date : target.firstDate;
+      target.lastDate = !target.lastDate || row.date > target.lastDate ? row.date : target.lastDate;
+    }
+    addMetrics(target, row);
+  }
+
+  return Array.from(byKey.values())
+    .map((row) => {
+      const enriched = enrichMetrics(row);
+      const days = row.dates.size;
+      return {
+        ...enriched,
+        days,
+        coveragePct: expectedDays ? (days / expectedDays) * 100 : 0,
+      };
+    })
+    .sort((a, b) => b.spend - a.spend);
+}
+
 function formatGeoTarget(value, prefix) {
   if (value === null || value === undefined || value === '') return '';
   const text = String(value);
@@ -649,6 +712,153 @@ function aggregateDetailCoverage(rows, detailCountByLevel = {}) {
 
 function insight({ severity = 'info', title, finding, evidence, recommendation, confidence = 'střední' }) {
   return { severity, title, finding, evidence, recommendation, confidence };
+}
+
+function comparisonMetric({ label, current, previous, formatter = formatNumber }) {
+  return {
+    label,
+    current,
+    previous,
+    changePct: relativeChange(current, previous),
+    currentLabel: formatter(current),
+    previousLabel: formatter(previous),
+  };
+}
+
+function buildPeriodComparison({ currentRange, previousRange, currentTotal, previousTotal, currentMarkets, previousMarkets, currentCampaigns, previousCampaigns }) {
+  const previousHasData = previousTotal.spend > 0 || previousTotal.conversionValue > 0 || previousTotal.clicks > 0;
+  const summary = [
+    comparisonMetric({ label: 'Spend', current: currentTotal.spend, previous: previousTotal.spend, formatter: formatCurrency }),
+    comparisonMetric({ label: 'Konv. hodnota', current: currentTotal.conversionValue, previous: previousTotal.conversionValue, formatter: formatCurrency }),
+    comparisonMetric({ label: 'Platform AOV', current: currentTotal.aov, previous: previousTotal.aov, formatter: formatCurrency }),
+    comparisonMetric({ label: 'ROAS', current: currentTotal.roas, previous: previousTotal.roas, formatter: formatRatio }),
+  ];
+  const signals = [];
+
+  if (!previousRange || !previousHasData) {
+    return {
+      currentRange,
+      previousRange,
+      previousHasData,
+      summary,
+      signals: [
+        insight({
+          severity: 'info',
+          title: 'Předchozí období nemá Ads data',
+          finding: 'Pro stejné předchozí období zatím nejsou v Supabase campaign Ads řádky, takže trendové srovnání není použitelné.',
+          evidence: previousRange
+            ? `Předchozí období ${previousRange.from} až ${previousRange.to}: spend ${formatCurrency(previousTotal.spend)}, řádky se spendem nejsou k dispozici.`
+            : 'Datumový filtr nejde převést na předchozí stejně dlouhé období.',
+          recommendation: 'Použít kratší filtr s pokrytými daty, nebo počkat na historický backfill pro dané období.',
+          confidence: 'vysoká',
+        }),
+      ],
+    };
+  }
+
+  const spendChange = relativeChange(currentTotal.spend, previousTotal.spend);
+  const valueChange = relativeChange(currentTotal.conversionValue, previousTotal.conversionValue);
+  const aovChange = relativeChange(currentTotal.aov, previousTotal.aov);
+  const roasChange = relativeChange(currentTotal.roas, previousTotal.roas);
+
+  if (aovChange !== null && aovChange < -15 && currentTotal.conversions >= 5) {
+    signals.push(insight({
+      severity: 'warning',
+      title: 'Platform AOV proti předchozímu období klesá',
+      finding: 'Reklamní konverze mají nižší průměrnou hodnotu než ve stejně dlouhém předchozím období.',
+      evidence: `AOV ${formatCurrency(previousTotal.aov)} → ${formatCurrency(currentTotal.aov)} (${formatSignedPercent(aovChange)}), konverze ${formatNumber(previousTotal.conversions)} → ${formatNumber(currentTotal.conversions)}.`,
+      recommendation: 'Hledat posun v kampaních, search terms, produktech a zemích, které začaly nosit levnější objednávky.',
+      confidence: 'střední',
+    }));
+  }
+
+  if (spendChange !== null && valueChange !== null && spendChange > 20 && valueChange < spendChange * 0.4) {
+    signals.push(insight({
+      severity: 'warning',
+      title: 'Spend roste rychleji než hodnota konverzí',
+      finding: 'Náklady proti předchozímu období rostou, ale platformní hodnota konverzí neroste stejným tempem.',
+      evidence: `Spend ${formatCurrency(previousTotal.spend)} → ${formatCurrency(currentTotal.spend)} (${formatSignedPercent(spendChange)}), konv. hodnota ${formatCurrency(previousTotal.conversionValue)} → ${formatCurrency(currentTotal.conversionValue)} (${formatSignedPercent(valueChange)}).`,
+      recommendation: 'Nejprve projít kampaně s největším nárůstem spendu a zkontrolovat, jestli nepřinášejí nízký AOV nebo horší ROAS.',
+      confidence: 'střední',
+    }));
+  }
+
+  if (roasChange !== null && roasChange < -20 && currentTotal.spend >= previousTotal.spend * 0.7) {
+    signals.push(insight({
+      severity: 'warning',
+      title: 'ROAS se proti předchozímu období zhoršil',
+      finding: 'Při podobném nebo vyšším spendu vychází platformní návratnost výrazně slabší.',
+      evidence: `ROAS ${formatRatio(previousTotal.roas)} → ${formatRatio(currentTotal.roas)} (${formatSignedPercent(roasChange)}), spend ${formatCurrency(currentTotal.spend)}.`,
+      recommendation: 'Porovnat mix zemí a kampaní, zejména ty s největším nárůstem podílu na spendu.',
+      confidence: 'střední',
+    }));
+  }
+
+  const previousMarketMap = new Map(previousMarkets.map((row) => [row.key, row]));
+  const marketShift = currentMarkets
+    .map((row) => {
+      const previous = previousMarketMap.get(row.key);
+      const currentShare = currentTotal.spend ? (row.spend / currentTotal.spend) * 100 : 0;
+      const previousShare = previousTotal.spend ? (toNumber(previous?.spend) / previousTotal.spend) * 100 : 0;
+      return { row, previous, currentShare, previousShare, shareDelta: currentShare - previousShare };
+    })
+    .filter((item) => item.row.spend >= Math.max(currentTotal.spend * 0.08, 500))
+    .sort((a, b) => b.shareDelta - a.shareDelta)[0];
+
+  if (marketShift && marketShift.shareDelta > 8) {
+    signals.push(insight({
+      severity: 'info',
+      title: `Spend mix se přesunul do ${marketLabel(marketShift.row.market)}`,
+      finding: 'Jedna země má výrazně vyšší podíl na spendu než v předchozím období.',
+      evidence: `${providerLabel(marketShift.row.provider)} / ${marketLabel(marketShift.row.market)}: podíl spendu ${formatPercent(marketShift.previousShare)} → ${formatPercent(marketShift.currentShare)} (${formatSignedPercentagePoints(marketShift.shareDelta)}), spend ${formatCurrency(marketShift.row.spend)}.`,
+      recommendation: 'Porovnat AOV a ROAS této země proti zbytku. Pokud má nižší hodnotu objednávky, může vysvětlovat pokles průměrné objednávky bez nutnosti změny cílení.',
+      confidence: 'střední',
+    }));
+  }
+
+  const previousCampaignMap = new Map(previousCampaigns.map((row) => [row.key, row]));
+  const campaignMover = currentCampaigns
+    .map((row) => {
+      const previous = previousCampaignMap.get(row.key);
+      return {
+        row,
+        previous,
+        spendDelta: row.spend - toNumber(previous?.spend),
+        spendChange: relativeChange(row.spend, previous?.spend),
+        aovChange: relativeChange(row.aov, previous?.aov),
+      };
+    })
+    .filter((item) => item.row.spend >= Math.max(currentTotal.spend * 0.08, 500) && item.spendDelta > 0)
+    .sort((a, b) => b.spendDelta - a.spendDelta)[0];
+
+  if (campaignMover) {
+    const previousAov = toNumber(campaignMover.previous?.aov);
+    const lowAovNow = currentTotal.aov > 0 && campaignMover.row.aov > 0 && campaignMover.row.aov < currentTotal.aov * 0.75;
+    const aovFell = campaignMover.aovChange !== null && campaignMover.aovChange < -15;
+    if (lowAovNow || aovFell) {
+      signals.push(insight({
+        severity: 'warning',
+        title: 'Kampaň s rostoucím spendem a slabším AOV',
+        finding: 'Jedna kampaň dostala proti předchozímu období více rozpočtu a zároveň má nízkou nebo klesající průměrnou hodnotu konverze.',
+        evidence: `${campaignMover.row.campaignName}: spend ${formatCurrency(toNumber(campaignMover.previous?.spend))} → ${formatCurrency(campaignMover.row.spend)} (${formatRelativeChange(campaignMover.row.spend, campaignMover.previous?.spend)}), AOV ${previousAov ? formatCurrency(previousAov) : 'bez předchozí hodnoty'} → ${formatCurrency(campaignMover.row.aov)}.`,
+        recommendation: 'Tohle je první kandidát na kontrolu search terms a produktového mixu. Pokud nosí levnější položky, oddělit cíle/rozpočet od kampaní, které nosí vysokou hodnotu objednávky.',
+        confidence: 'střední',
+      }));
+    }
+  }
+
+  if (!signals.length) {
+    signals.push(insight({
+      severity: 'good',
+      title: 'Proti předchozímu období bez ostrého varování',
+      finding: 'Na úrovni campaign spendu nevidím dramatický posun v AOV, ROAS ani mixu zemí.',
+      evidence: `Spend ${formatCurrency(previousTotal.spend)} → ${formatCurrency(currentTotal.spend)}, AOV ${formatCurrency(previousTotal.aov)} → ${formatCurrency(currentTotal.aov)}, ROAS ${formatRatio(previousTotal.roas)} → ${formatRatio(currentTotal.roas)}.`,
+      recommendation: 'Další vrstva je produkt/search term detail a reálná marže podle objednávek, jakmile budou business views v Supabase.',
+      confidence: 'střední',
+    }));
+  }
+
+  return { currentRange, previousRange, previousHasData, summary, signals: signals.slice(0, 4) };
 }
 
 function buildPpcInsights({
@@ -1127,6 +1337,55 @@ function InsightCard({ item }) {
   );
 }
 
+function TrendValue({ row }) {
+  const change = row.changePct;
+  const tone = change === null
+    ? 'text-slate-400'
+    : change > 0
+      ? 'text-emerald-700'
+      : change < 0
+        ? 'text-red-700'
+        : 'text-slate-500';
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{row.label}</div>
+      <div className="mt-1 text-xl font-bold text-slate-800">{row.currentLabel}</div>
+      <div className={`mt-1 text-xs font-semibold ${tone}`}>{change === null ? 'bez předchozí hodnoty' : formatSignedPercent(change)}</div>
+      <div className="text-xs text-slate-400">předtím {row.previousLabel}</div>
+    </div>
+  );
+}
+
+function PeriodComparisonPanel({ comparison }) {
+  if (!comparison) return null;
+  const rangeLabel = comparison.previousRange
+    ? `${comparison.previousRange.from} až ${comparison.previousRange.to}`
+    : 'bez předchozího období';
+
+  return (
+    <div>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-800">Změna proti předchozímu období</h3>
+          <div className="text-xs text-slate-500">Srovnání se stejně dlouhým obdobím: {rangeLabel}</div>
+        </div>
+        <StatusBadge value={comparison.previousHasData ? 'trend OK' : 'bez trendu'} />
+      </div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {comparison.summary.map((row) => (
+          <TrendValue key={row.label} row={row} />
+        ))}
+      </div>
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        {comparison.signals.map((item, index) => (
+          <InsightCard key={`${item.title}:${index}`} item={item} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ProviderCoverageCard({ row }) {
   const completeEnough = row.coveragePct >= 95;
   const campaignRun = row.latestCampaignRun;
@@ -1472,6 +1731,7 @@ function AdsTooltip({ active, payload }) {
 export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, orders = [] }) {
   const [dailyRows, setDailyRows] = useState([]);
   const [campaignRows, setCampaignRows] = useState([]);
+  const [previousCampaignRows, setPreviousCampaignRows] = useState([]);
   const [campaignMetaRows, setCampaignMetaRows] = useState([]);
   const [detailRows, setDetailRows] = useState([]);
   const [detailCounts, setDetailCounts] = useState({ byLevel: {}, byProvider: {} });
@@ -1499,6 +1759,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
         if (country && country !== 'all') return query.eq('market', country);
         return query;
       };
+      const previousRange = previousDateRange(dateFrom, dateTo);
 
       const campaignMetricQuery = applyMarket(
         supabaseClient
@@ -1510,6 +1771,19 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
           .order('date', { ascending: true })
           .range(0, 9999)
       );
+
+      const previousCampaignMetricQuery = previousRange
+        ? applyMarket(
+            supabaseClient
+              .from('ad_metrics_daily')
+              .select('date,provider,market,account_id,account_name,level,campaign_id,campaign_name,currency,spend_czk,impressions,clicks,interactions,conversions,conversion_value_czk')
+              .gte('date', previousRange.from)
+              .lte('date', previousRange.to)
+              .eq('level', 'campaign')
+              .order('date', { ascending: true })
+              .range(0, 9999)
+          )
+        : Promise.resolve({ data: [], error: null });
 
       const detailQueries = DETAIL_COVERAGE_LEVELS.map((level) => applyMarket(
         supabaseClient
@@ -1571,8 +1845,9 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
           .range(0, 9999)
       );
 
-      const [campaignMetricResult, metaResult, runsResult, businessDailyResult, businessProviderResult, ...detailAndCountResults] = await Promise.all([
+      const [campaignMetricResult, previousCampaignMetricResult, metaResult, runsResult, businessDailyResult, businessProviderResult, ...detailAndCountResults] = await Promise.all([
         campaignMetricQuery,
+        previousCampaignMetricQuery,
         metaQuery,
         runsQuery,
         businessDailyQuery,
@@ -1585,7 +1860,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
       const detailResults = detailAndCountResults.slice(0, DETAIL_COVERAGE_LEVELS.length);
       const detailCountResults = detailAndCountResults.slice(DETAIL_COVERAGE_LEVELS.length, DETAIL_COVERAGE_LEVELS.length * 2);
       const providerDetailCountResults = detailAndCountResults.slice(DETAIL_COVERAGE_LEVELS.length * 2);
-      const firstError = [campaignMetricResult, metaResult, runsResult, ...detailResults].find((result) => result.error)?.error;
+      const firstError = [campaignMetricResult, previousCampaignMetricResult, metaResult, runsResult, ...detailResults].find((result) => result.error)?.error;
       if (firstError) throw firstError;
 
       if (!cancelled) {
@@ -1595,6 +1870,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
 
         setDailyRows(campaignMetricResult.data || []);
         setCampaignRows(campaignMetricResult.data || []);
+        setPreviousCampaignRows(previousCampaignMetricResult.data || []);
         setDetailRows(detailResults.flatMap((result) => result.data || []));
         setDetailCounts({
           byLevel: Object.fromEntries(DETAIL_COVERAGE_LEVELS.map((level, index) => [
@@ -1681,6 +1957,23 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
     [businessViewsLoaded, businessProviderRows, dailyRows, orderByMarket, dateFrom, dateTo]
   );
   const campaigns = useMemo(() => aggregateCampaigns(campaignRows, campaignMeta), [campaignRows, campaignMeta]);
+  const comparisonRange = useMemo(() => previousDateRange(dateFrom, dateTo), [dateFrom, dateTo]);
+  const previousTotal = useMemo(() => metricSummary(previousCampaignRows), [previousCampaignRows]);
+  const previousMarkets = useMemo(
+    () => comparisonRange ? aggregateAdMarkets(previousCampaignRows, comparisonRange.from, comparisonRange.to) : [],
+    [previousCampaignRows, comparisonRange]
+  );
+  const previousCampaigns = useMemo(() => aggregateCampaigns(previousCampaignRows, campaignMeta), [previousCampaignRows, campaignMeta]);
+  const periodComparison = useMemo(() => buildPeriodComparison({
+    currentRange: { from: dateFrom, to: dateTo },
+    previousRange: comparisonRange,
+    currentTotal: total,
+    previousTotal,
+    currentMarkets: aggregateAdMarkets(campaignRows, dateFrom, dateTo),
+    previousMarkets,
+    currentCampaigns: campaigns,
+    previousCampaigns,
+  }), [dateFrom, dateTo, comparisonRange, total, previousTotal, campaignRows, previousMarkets, campaigns, previousCampaigns]);
   const topDevices = useMemo(() => aggregateDetails(detailRows, 'device'), [detailRows]);
   const topAdGroups = useMemo(() => aggregateDetails(detailRows, 'ad_group'), [detailRows]);
   const topAds = useMemo(() => aggregateDetails(detailRows, 'ad'), [detailRows]);
@@ -1718,6 +2011,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
     topPlacements,
     daily,
     providerCoverage,
+    periodComparison,
   }), [
     total,
     businessTotal,
@@ -1735,6 +2029,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
     topPlacements,
     daily,
     providerCoverage,
+    periodComparison,
   ]);
   const latestRun = syncRuns[0];
 
@@ -1789,6 +2084,8 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
         orderTotal={orderTotal}
         businessViewState={businessViewState}
       />
+
+      <PeriodComparisonPanel comparison={periodComparison} />
 
       <div>
         <div className="mb-3 flex items-center justify-between gap-3">
