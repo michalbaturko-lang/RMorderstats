@@ -18,7 +18,7 @@ import {
   resolveDateRange,
 } from './lib/ads-sync-utils.mjs';
 
-const DEFAULT_LEVELS = ['campaign', 'adset', 'ad', 'audience', 'geo', 'placement'];
+const DEFAULT_LEVELS = ['campaign', 'adset', 'ad', 'device', 'audience', 'geo', 'placement'];
 const REQUIRED_FIELDS = ['market', 'accountId'];
 
 function parseCsv(value, fallback) {
@@ -106,6 +106,7 @@ const LEVEL_QUERIES = {
   campaign: { required: true, level: 'campaign', breakdowns: [] },
   adset: { required: true, level: 'adset', breakdowns: [] },
   ad: { required: true, level: 'ad', breakdowns: [] },
+  device: { required: true, level: 'campaign', breakdowns: ['impression_device'] },
   audience: { required: true, level: 'adset', breakdowns: ['age', 'gender'] },
   geo: { required: true, level: 'campaign', breakdowns: ['country'] },
   placement: { required: true, level: 'adset', breakdowns: ['publisher_platform', 'platform_position', 'impression_device'] },

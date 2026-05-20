@@ -30,7 +30,7 @@ on:
         required: false
         default: ''
       meta_detail_levels:
-        description: 'Optional Meta detail levels, for example campaign,adset,ad'
+        description: 'Optional Meta detail levels, for example campaign,adset,ad,device'
         required: false
         default: ''
 
@@ -84,4 +84,4 @@ jobs:
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
           META_ADS_ACCOUNTS_JSON: ${{ secrets.META_ADS_ACCOUNTS_JSON }}
           META_GRAPH_API_VERSION: ${{ vars.META_GRAPH_API_VERSION || 'v24.0' }}
-          META_ADS_DETAIL_LEVELS: ${{ github.event.inputs.meta_detail_levels || vars.META_ADS_DETAIL_LEVELS || 'campaign,adset,ad,audience,geo,placement' }}
+          META_ADS_DETAIL_LEVELS: ${{ github.event.inputs.meta_detail_levels || vars.META_ADS_DETAIL_LEVELS || 'campaign,adset,ad,device,audience,geo,placement' }}

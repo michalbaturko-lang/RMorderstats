@@ -11,7 +11,7 @@
  *
  * Optional env vars:
  * - META_GRAPH_API_VERSION (default: v24.0)
- * - META_ADS_DETAIL_LEVELS (default: campaign,adset,ad,audience,geo,placement)
+ * - META_ADS_DETAIL_LEVELS (default: campaign,adset,ad,device,audience,geo,placement)
  * - SYNC_DAYS_BACK / SYNC_FROM_DATE / SYNC_TO_DATE / SYNC_MARKETS
  * - FX_RATES_JSON
  */
@@ -42,7 +42,7 @@ import {
 
 const PROVIDER = 'meta_ads';
 const REQUIRED_ENV_VARS = ['META_ACCESS_TOKEN', 'META_ADS_ACCOUNTS_JSON', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'];
-const DEFAULT_LEVELS = ['campaign', 'adset', 'ad', 'audience', 'geo', 'placement'];
+const DEFAULT_LEVELS = ['campaign', 'adset', 'ad', 'device', 'audience', 'geo', 'placement'];
 const PURCHASE_ACTIONS = [
   'purchase',
   'omni_purchase',
@@ -139,6 +139,7 @@ const LEVEL_QUERIES = {
   campaign: { required: true, level: 'campaign', breakdowns: [] },
   adset: { required: false, level: 'adset', breakdowns: [] },
   ad: { required: false, level: 'ad', breakdowns: [] },
+  device: { required: false, level: 'campaign', breakdowns: ['impression_device'] },
   audience: { required: false, level: 'adset', breakdowns: ['age', 'gender'] },
   geo: { required: false, level: 'campaign', breakdowns: ['country'] },
   placement: { required: false, level: 'adset', breakdowns: ['publisher_platform', 'platform_position', 'impression_device'] },
@@ -153,6 +154,11 @@ function dimensionsForLevel(level, row) {
     return {
       age: row.age || null,
       gender: row.gender || null,
+    };
+  }
+  if (level === 'device') {
+    return {
+      device: row.impression_device || null,
     };
   }
   if (level === 'geo') {

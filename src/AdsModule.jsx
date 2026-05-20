@@ -27,6 +27,7 @@ const MARKET_LABELS = {
 const CURRENCY_RATES = { CZK: 1, EUR: 25.2, HUF: 0.063, RON: 5.1 };
 
 const LEVEL_LABELS = {
+  device: 'Zařízení',
   ad_group: 'Ad groups',
   ad: 'Ads',
   keyword: 'Keywords',
@@ -42,6 +43,7 @@ const LEVEL_LABELS = {
 
 const EXPECTED_PROVIDERS = ['google_ads', 'meta_ads'];
 const DETAIL_COVERAGE_LEVELS = [
+  'device',
   'hour',
   'ad_group',
   'ad',
@@ -438,6 +440,7 @@ function aggregateDetails(rows, level) {
       dimensions.publisher_platform,
       dimensions.platform_position,
       dimensions.impression_device,
+      dimensions.device,
       dimensions.age,
       dimensions.gender,
       dimensions.country,
@@ -468,8 +471,10 @@ function aggregateDetails(rows, level) {
                 ? [dimensions.age, dimensions.gender].filter(Boolean).join(' / ') || '(bez audience)'
                 : level === 'geo'
                   ? geoDetailLabel(dimensions)
-                  : level === 'placement'
-                    ? [dimensions.publisher_platform, dimensions.platform_position, dimensions.impression_device].filter(Boolean).join(' / ') || '(bez placementu)'
+                : level === 'placement'
+                  ? [dimensions.publisher_platform, dimensions.platform_position, dimensions.impression_device].filter(Boolean).join(' / ') || '(bez placementu)'
+                  : level === 'device'
+                    ? dimensions.device || dimensions.impression_device || '(bez zařízení)'
               : level === 'ad'
                 ? dimensions.ad_name || dimensions.ad_id || '(bez reklamy)'
                 : level === 'ad_group'
@@ -494,6 +499,8 @@ function aggregateDetails(rows, level) {
                   ? geoDetailSubLabel(dimensions)
                   : level === 'placement'
                     ? dimensions.publisher_platform
+                    : level === 'device'
+                      ? [dimensions.publisher_platform, dimensions.platform_position].filter(Boolean).join(' / ') || null
                     : null;
 
       byKey.set(key, {
@@ -1431,6 +1438,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
     [businessViewsLoaded, businessProviderRows, dailyRows, orderByMarket, dateFrom, dateTo]
   );
   const campaigns = useMemo(() => aggregateCampaigns(campaignRows, campaignMeta), [campaignRows, campaignMeta]);
+  const topDevices = useMemo(() => aggregateDetails(detailRows, 'device'), [detailRows]);
   const topAdGroups = useMemo(() => aggregateDetails(detailRows, 'ad_group'), [detailRows]);
   const topAds = useMemo(() => aggregateDetails(detailRows, 'ad'), [detailRows]);
   const topKeywords = useMemo(() => aggregateDetails(detailRows, 'keyword'), [detailRows]);
@@ -1624,6 +1632,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
 
       <div className="grid gap-5 xl:grid-cols-3">
         <DetailTable title={LEVEL_LABELS.ad_group} rows={topAdGroups} />
+        <DetailTable title={LEVEL_LABELS.device} rows={topDevices} />
         <DetailTable title={LEVEL_LABELS.ad} rows={topAds} />
         <DetailTable title={LEVEL_LABELS.keyword} rows={topKeywords} />
         <DetailTable title={LEVEL_LABELS.search_term} rows={topSearchTerms} />

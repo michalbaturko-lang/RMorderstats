@@ -22,7 +22,7 @@ on:
       levels:
         description: 'Meta levels to test'
         required: false
-        default: 'campaign,adset,ad,audience,geo,placement'
+        default: 'campaign,adset,ad,device,audience,geo,placement'
       require_secrets:
         description: 'Fail if Meta secrets are missing'
         required: false
@@ -55,7 +55,7 @@ jobs:
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
           META_ADS_ACCOUNTS_JSON: ${{ secrets.META_ADS_ACCOUNTS_JSON }}
           META_GRAPH_API_VERSION: ${{ vars.META_GRAPH_API_VERSION || 'v24.0' }}
-          META_READINESS_DETAIL_LEVELS: ${{ github.event.inputs.levels || vars.META_READINESS_DETAIL_LEVELS || 'campaign,adset,ad,audience,geo,placement' }}
+          META_READINESS_DETAIL_LEVELS: ${{ github.event.inputs.levels || vars.META_READINESS_DETAIL_LEVELS || 'campaign,adset,ad,device,audience,geo,placement' }}
           META_READINESS_REQUIRE_SECRETS: ${{ github.event.inputs.require_secrets || '1' }}
           META_READINESS_REQUIRE_INSIGHT_ROWS: ${{ github.event.inputs.require_insight_rows || vars.META_READINESS_REQUIRE_INSIGHT_ROWS || '0' }}
           FX_RATES_JSON: ${{ vars.FX_RATES_JSON || '{"CZK":1,"EUR":25.2,"HUF":0.063,"RON":5.1}' }}
