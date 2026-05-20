@@ -209,6 +209,8 @@ const getDatePreset = (preset) => {
       const ninetyAgo = new Date(today);
       ninetyAgo.setDate(today.getDate() - 90);
       return { from: formatDate(ninetyAgo), to: formatDate(today) };
+    case 'this_year':
+      return { from: formatDate(new Date(today.getFullYear(), 0, 1)), to: formatDate(today) };
     case 'all':
       return { from: '2025-11-01', to: formatDate(today) };
     default:
@@ -1322,6 +1324,7 @@ export default function App() {
             <DatePresetButton label="Minulý měsíc" active={activePreset === 'last_month'} onClick={() => applyPreset('last_month')} />
             <DatePresetButton label="30 dní" active={activePreset === 'last_30'} onClick={() => applyPreset('last_30')} />
             <DatePresetButton label="90 dní" active={activePreset === 'last_90'} onClick={() => applyPreset('last_90')} />
+            <DatePresetButton label="Od začátku roku" active={activePreset === 'this_year'} onClick={() => applyPreset('this_year')} />
             <DatePresetButton label="Vše" active={activePreset === 'all'} onClick={() => applyPreset('all')} />
           </div>
           <div className="flex items-center gap-2">
