@@ -30,6 +30,19 @@ const DEFAULT_DETAIL_LEVELS = [
   'geo',
   'conversion_action',
 ];
+const DEFAULT_GOOGLE_DETAIL_LEVELS = [
+  'campaign',
+  'device',
+  'hour',
+  'ad_group',
+  'ad',
+  'keyword',
+  'search_term',
+  'shopping_product',
+  'asset_group',
+  'geo',
+  'conversion_action',
+];
 const CORE_RELATIONS = [
   'ad_accounts',
   'ad_campaigns',
@@ -53,6 +66,17 @@ function parseCsv(value, fallback) {
     .map((item) => item.trim())
     .filter(Boolean);
   return values.length ? values : fallback;
+}
+
+function parseJsonEnv(name, fallback) {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    console.warn(`[marketing-status] ${name}: invalid JSON (${error.message})`);
+    return fallback;
+  }
 }
 
 function parseBooleanEnv(name, fallback) {
@@ -258,6 +282,63 @@ function syncTypeLevels(syncType) {
   return rawLevels.split(',').map((level) => level.trim()).filter(Boolean);
 }
 
+function isActiveForRange(account, from, to) {
+  const activeFrom = account.activeFrom || account.active_from || null;
+  const activeTo = account.activeTo || account.active_to || null;
+  if (activeFrom && activeFrom > to) return false;
+  if (activeTo && activeTo < from) return false;
+  return true;
+}
+
+function googleAccountsForEstimate(markets, from, to) {
+  const marketFilter = new Set(markets.map((market) => String(market).toLowerCase()));
+  const accounts = parseJsonEnv('GOOGLE_ADS_ACCOUNTS_JSON', []);
+  if (!Array.isArray(accounts)) return [];
+
+  return accounts
+    .map((account) => ({
+      ...account,
+      market: String(account.market || 'unknown').toLowerCase(),
+      customerId: account.customerId || account.accountId || '',
+    }))
+    .filter((account) => (
+      account.enabled !== false &&
+      account.customerId &&
+      marketFilter.has(account.market) &&
+      isActiveForRange(account, from, to)
+    ));
+}
+
+function estimateGoogleAdsApiOperations({ markets, from, to }) {
+  const accounts = googleAccountsForEstimate(markets, from, to);
+  const spendLevels = parseCsv(process.env.MARKETING_STATUS_GOOGLE_SPEND_LEVELS, ['campaign']);
+  const detailLevels = parseCsv(process.env.GOOGLE_ADS_DETAIL_LEVELS, DEFAULT_GOOGLE_DETAIL_LEVELS);
+  const spendRunsPerDay = parseNumberEnv('MARKETING_STATUS_GOOGLE_SPEND_RUNS_PER_DAY', 96);
+  const detailRunsPerDay = parseNumberEnv('MARKETING_STATUS_GOOGLE_DETAIL_RUNS_PER_DAY', 1);
+  const dailyLimit = parseNumberEnv('MARKETING_STATUS_GOOGLE_DAILY_OPERATION_LIMIT', 2880);
+  const spendOpsPerRun = accounts.length * spendLevels.length;
+  const detailOpsPerRun = accounts.length * detailLevels.length;
+  const spendOpsPerDay = spendOpsPerRun * spendRunsPerDay;
+  const detailOpsPerDay = detailOpsPerRun * detailRunsPerDay;
+  const totalOpsPerDay = spendOpsPerDay + detailOpsPerDay;
+  const utilizationPct = dailyLimit ? (totalOpsPerDay / dailyLimit) * 100 : 0;
+
+  return {
+    accounts,
+    spendLevels,
+    detailLevels,
+    spendRunsPerDay,
+    detailRunsPerDay,
+    dailyLimit,
+    spendOpsPerRun,
+    detailOpsPerRun,
+    spendOpsPerDay,
+    detailOpsPerDay,
+    totalOpsPerDay,
+    utilizationPct,
+  };
+}
+
 function isDeepDetailRun(run) {
   if (!String(run.sync_type || '').startsWith('detail:')) return false;
   return syncTypeLevels(run.sync_type).some((level) => level !== 'campaign');
@@ -417,6 +498,31 @@ function printDetailCoverage(summary, providers, markets, levels) {
   }
 }
 
+function printGoogleApiBudgetEstimate(estimate, blockers) {
+  console.log([
+    '[marketing-status] Google Ads API budget estimate',
+    `accounts=${formatNumber(estimate.accounts.length)}`,
+    `spend_levels=${estimate.spendLevels.join(',')}`,
+    `detail_levels=${estimate.detailLevels.join(',')}`,
+    `spend_runs_per_day=${formatNumber(estimate.spendRunsPerDay)}`,
+    `detail_runs_per_day=${formatNumber(estimate.detailRunsPerDay)}`,
+    `spend_ops_per_day=${formatNumber(estimate.spendOpsPerDay)}`,
+    `detail_ops_per_day=${formatNumber(estimate.detailOpsPerDay)}`,
+    `total_ops_per_day=${formatNumber(estimate.totalOpsPerDay)}`,
+    `daily_limit=${formatNumber(estimate.dailyLimit)}`,
+    `utilization=${estimate.utilizationPct.toFixed(1)}%`,
+  ].join(' | '));
+
+  if (!estimate.accounts.length) {
+    console.log('[marketing-status] Google Ads API budget estimate: no active accounts in GOOGLE_ADS_ACCOUNTS_JSON for selected markets/range');
+    return;
+  }
+
+  if (estimate.utilizationPct > 85) {
+    blockers.push(`Google Ads API budget: estimated ${estimate.totalOpsPerDay} ops/day is ${estimate.utilizationPct.toFixed(1)}% of limit ${estimate.dailyLimit}`);
+  }
+}
+
 function escapeMarkdownCell(value) {
   return String(value ?? '').replace(/\|/g, '\\|').replace(/\n/g, '<br>');
 }
@@ -459,6 +565,21 @@ function campaignCoverageMarkdownRows(summary, providers, markets) {
   return rows;
 }
 
+function googleApiBudgetMarkdownRows(estimate) {
+  return [
+    ['Active accounts', formatNumber(estimate.accounts.length)],
+    ['Spend sync ops / run', formatNumber(estimate.spendOpsPerRun)],
+    ['Spend sync runs / day', formatNumber(estimate.spendRunsPerDay)],
+    ['Spend ops / day', formatNumber(estimate.spendOpsPerDay)],
+    ['Detail sync ops / run', formatNumber(estimate.detailOpsPerRun)],
+    ['Detail sync runs / day', formatNumber(estimate.detailRunsPerDay)],
+    ['Detail ops / day', formatNumber(estimate.detailOpsPerDay)],
+    ['Estimated total ops / day', formatNumber(estimate.totalOpsPerDay)],
+    ['Configured daily limit', formatNumber(estimate.dailyLimit)],
+    ['Estimated utilization', `${estimate.utilizationPct.toFixed(1)} %`],
+  ];
+}
+
 async function writeGithubSummary({
   from,
   to,
@@ -471,6 +592,7 @@ async function writeGithubSummary({
   businessStatuses,
   currentCampaignSummary,
   historicalCampaignSummary,
+  googleApiBudget,
   blockers,
 }) {
   if (!process.env.GITHUB_STEP_SUMMARY) return;
@@ -513,6 +635,10 @@ async function writeGithubSummary({
       campaignCoverageMarkdownRows(historicalCampaignSummary, providers, markets),
     ),
     '',
+    '### Google Ads API Operation Budget',
+    '',
+    markdownTable(['Metric', 'Value'], googleApiBudgetMarkdownRows(googleApiBudget)),
+    '',
     '### Supabase Relations',
     '',
     markdownTable(['Relation', 'Status'], relationMarkdownRows(coreStatuses)),
@@ -547,6 +673,9 @@ Env:
   MARKETING_STATUS_HEALTH_DATE=YYYY-MM-DD
   MARKETING_STATUS_REQUIRE_COMPLETE=0
   MARKETING_STATUS_MAX_CAMPAIGN_AGE_MINUTES=45
+  MARKETING_STATUS_GOOGLE_DAILY_OPERATION_LIMIT=2880
+  MARKETING_STATUS_GOOGLE_SPEND_RUNS_PER_DAY=96
+  MARKETING_STATUS_GOOGLE_DETAIL_RUNS_PER_DAY=1
 `);
 }
 
@@ -582,6 +711,8 @@ async function main() {
   printSecretStatus('Supabase DB apply secret', dbApplySecrets, blockers);
   printSecretStatus('Google Ads read-only credentials', googleSecrets, blockers);
   printSecretStatus('Meta Ads read-only credentials', metaSecrets, blockers);
+  const googleApiBudget = estimateGoogleAdsApiOperations({ markets, from, to });
+  printGoogleApiBudgetEstimate(googleApiBudget, blockers);
 
   const coreStatuses = await Promise.all(CORE_RELATIONS.map((relation) => relationStatus({ supabaseUrl, serviceRoleKey, relation })));
   const businessStatuses = await Promise.all(BUSINESS_VIEWS.map((relation) => relationStatus({ supabaseUrl, serviceRoleKey, relation })));
@@ -674,6 +805,7 @@ async function main() {
     businessStatuses,
     currentCampaignSummary,
     historicalCampaignSummary,
+    googleApiBudget,
     blockers,
   });
 

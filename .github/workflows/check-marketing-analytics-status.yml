@@ -66,6 +66,7 @@ jobs:
           GOOGLE_ADS_BASE44_ACCESS_TOKEN: ${{ secrets.GOOGLE_ADS_BASE44_ACCESS_TOKEN }}
           GOOGLE_ADS_BASE44_TOKEN_ACCOUNT_ID: ${{ secrets.GOOGLE_ADS_BASE44_TOKEN_ACCOUNT_ID }}
           GOOGLE_ADS_ACCOUNTS_JSON: ${{ secrets.GOOGLE_ADS_ACCOUNTS_JSON }}
+          GOOGLE_ADS_DETAIL_LEVELS: ${{ vars.GOOGLE_ADS_DETAIL_LEVELS || 'campaign,device,hour,ad_group,ad,keyword,search_term,shopping_product,asset_group,geo,conversion_action' }}
 
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
           META_ADS_ACCOUNTS_JSON: ${{ secrets.META_ADS_ACCOUNTS_JSON }}
@@ -77,4 +78,7 @@ jobs:
           MARKETING_STATUS_HEALTH_DATE: ${{ github.event.inputs.health_date || '' }}
           MARKETING_STATUS_DETAIL_LEVELS: ${{ vars.MARKETING_STATUS_DETAIL_LEVELS || 'device,hour,ad_group,ad,keyword,search_term,shopping_product,asset_group,geo,conversion_action,audience,placement' }}
           MARKETING_STATUS_MAX_CAMPAIGN_AGE_MINUTES: ${{ github.event.inputs.max_campaign_age_minutes || vars.MARKETING_STATUS_MAX_CAMPAIGN_AGE_MINUTES || '45' }}
+          MARKETING_STATUS_GOOGLE_DAILY_OPERATION_LIMIT: ${{ vars.MARKETING_STATUS_GOOGLE_DAILY_OPERATION_LIMIT || '2880' }}
+          MARKETING_STATUS_GOOGLE_SPEND_RUNS_PER_DAY: ${{ vars.MARKETING_STATUS_GOOGLE_SPEND_RUNS_PER_DAY || '96' }}
+          MARKETING_STATUS_GOOGLE_DETAIL_RUNS_PER_DAY: ${{ vars.MARKETING_STATUS_GOOGLE_DETAIL_RUNS_PER_DAY || '1' }}
           MARKETING_STATUS_REQUIRE_COMPLETE: ${{ github.event.inputs.require_complete || '0' }}

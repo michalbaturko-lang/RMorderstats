@@ -864,6 +864,105 @@ function compareCampaignRows(currentCampaigns, previousCampaigns) {
     .slice(0, 8);
 }
 
+function buildCampaignActions({ campaigns, total, periodComparison }) {
+  const moverByKey = new Map((periodComparison?.campaignMovers || []).map((row) => [row.key, row]));
+  const minSpend = Math.max(total.spend * 0.04, 300);
+  const highSpend = Math.max(total.spend * 0.10, 800);
+  const benchmarkRoas = total.roas || 0;
+  const benchmarkAov = total.aov || 0;
+
+  return campaigns
+    .filter((row) => row.spend >= minSpend || row.conversions > 0)
+    .map((row) => {
+      const mover = moverByKey.get(row.key);
+      const aovWeak = benchmarkAov > 0 && row.aov > 0 && row.aov < benchmarkAov * 0.75;
+      const roasWeak = row.roas > 0 && row.roas < Math.max(benchmarkRoas * 0.55, 1.1);
+      const roasStrong = row.conversions > 0 && row.roas >= Math.max(benchmarkRoas * 1.25, 2.5);
+      const aovHealthy = benchmarkAov <= 0 || row.aov >= benchmarkAov * 0.9;
+      const spendGrowing = mover?.spendDelta > 0;
+      const aovFalling = mover?.aovChange !== null && mover?.aovChange < -15;
+      const roasFalling = mover?.roasChange !== null && mover?.roasChange < -20;
+
+      if (row.spend >= highSpend && row.conversions <= 0) {
+        return {
+          key: row.key,
+          priority: 0,
+          tone: 'critical',
+          action: 'Auditovat hned',
+          row,
+          mover,
+          reason: 'Významný spend bez konverzí.',
+          nextStep: 'Projít search terms, produkty a bidding; pokud nejde o brand/remarketing výjimku, dát do izolované kontroly rozpočet.',
+        };
+      }
+
+      if (row.spend >= highSpend && roasWeak) {
+        return {
+          key: row.key,
+          priority: 1,
+          tone: 'warning',
+          action: 'Omezit / rozdělit',
+          row,
+          mover,
+          reason: 'Spend je významný a platformní ROAS je pod výkonem účtu.',
+          nextStep: 'Rozsekat podle produktů, search terms a zařízení; rozpočet držet jen na segmentech s lepším AOV/ROAS.',
+        };
+      }
+
+      if (spendGrowing && (aovFalling || roasFalling || aovWeak)) {
+        return {
+          key: row.key,
+          priority: 2,
+          tone: 'warning',
+          action: 'Prověřit mix',
+          row,
+          mover,
+          reason: 'Kampaň bere víc spendu a zároveň ukazuje slabší AOV nebo ROAS.',
+          nextStep: 'Porovnat nové dotazy/produkty proti předchozímu období; hledat levné položky nebo méně hodnotné publikum.',
+        };
+      }
+
+      if (roasStrong && aovHealthy) {
+        return {
+          key: row.key,
+          priority: 3,
+          tone: 'good',
+          action: 'Škálovat opatrně',
+          row,
+          mover,
+          reason: 'Nadprůměrný ROAS a zdravé AOV.',
+          nextStep: 'Navýšit postupně a hlídat, jestli po navýšení neklesá AOV nebo hrubý zisk po Ads.',
+        };
+      }
+
+      if (aovWeak && row.spend >= minSpend) {
+        return {
+          key: row.key,
+          priority: 4,
+          tone: 'info',
+          action: 'Oddělit nízké AOV',
+          row,
+          mover,
+          reason: 'Kampaň nosí levnější konverze než účet jako celek.',
+          nextStep: 'Nedávat ji do stejného cíle jako kampaně s vysokou hodnotou objednávky; řídit vlastním PNO/ROAS cílem.',
+        };
+      }
+
+      return {
+        key: row.key,
+        priority: 5,
+        tone: 'neutral',
+        action: 'Hlídací seznam',
+        row,
+        mover,
+        reason: 'Má spend nebo konverze, ale bez ostrého signálu ke změně.',
+        nextStep: 'Nechat běžet a sledovat trend AOV, ROAS a podíl spendu.',
+      };
+    })
+    .sort((a, b) => a.priority - b.priority || b.row.spend - a.row.spend)
+    .slice(0, 10);
+}
+
 function buildPeriodComparison({
   currentRange,
   previousRange,
@@ -1991,6 +2090,75 @@ function CampaignTable({ rows }) {
   );
 }
 
+function CampaignActionTable({ actions }) {
+  if (!actions.length) {
+    return (
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+        Ve zvoleném období zatím není dost kampaní pro akční shortlist.
+      </div>
+    );
+  }
+
+  const toneClass = {
+    critical: 'border-red-200 bg-red-50 text-red-800',
+    warning: 'border-amber-200 bg-amber-50 text-amber-800',
+    good: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    info: 'border-blue-200 bg-blue-50 text-blue-800',
+    neutral: 'border-slate-200 bg-slate-50 text-slate-700',
+  };
+
+  return (
+    <div className="overflow-x-auto rounded-lg border border-slate-200">
+      <table className="w-full min-w-[980px] text-sm">
+        <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+          <tr>
+            <th className="px-3 py-2 text-left">Akce</th>
+            <th className="px-3 py-2 text-left">Kampaň</th>
+            <th className="px-3 py-2 text-left">Proč</th>
+            <th className="px-3 py-2 text-right">Spend</th>
+            <th className="px-3 py-2 text-right">ROAS</th>
+            <th className="px-3 py-2 text-right">AOV</th>
+            <th className="px-3 py-2 text-left">Trend</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {actions.map(({ key, action, tone, row, mover, reason, nextStep }) => (
+            <tr key={key} className="hover:bg-slate-50">
+              <td className="px-3 py-2 align-top">
+                <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-semibold ${toneClass[tone] || toneClass.neutral}`}>
+                  {action}
+                </span>
+              </td>
+              <td className="px-3 py-2 align-top">
+                <div className="font-semibold text-slate-800">{row.campaignName}</div>
+                <div className="text-xs text-slate-400">{providerLabel(row.provider)} / {marketLabel(row.market)} · {row.channelType || 'typ neznámý'}</div>
+              </td>
+              <td className="px-3 py-2 align-top">
+                <div className="font-medium text-slate-700">{reason}</div>
+                <div className="mt-1 text-xs leading-relaxed text-slate-500">{nextStep}</div>
+              </td>
+              <td className="px-3 py-2 text-right align-top font-semibold text-red-700">{formatCurrency(row.spend)}</td>
+              <td className="px-3 py-2 text-right align-top font-bold text-slate-800">{formatRatio(row.roas)}</td>
+              <td className="px-3 py-2 text-right align-top text-slate-700">{formatCurrency(row.aov)}</td>
+              <td className="px-3 py-2 align-top text-xs text-slate-500">
+                {mover ? (
+                  <>
+                    <div>Δ spend {formatCurrency(mover.spendDelta)} ({mover.spendChange === null ? 'bez srovnání' : formatSignedPercent(mover.spendChange)})</div>
+                    <div>Δ AOV {mover.aovChange === null ? 'bez srovnání' : formatSignedPercent(mover.aovChange)}</div>
+                    <div>Δ ROAS {mover.roasChange === null ? 'bez srovnání' : formatSignedPercent(mover.roasChange)}</div>
+                  </>
+                ) : (
+                  <div>Bez trendu proti předchozímu období.</div>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function DetailTable({ title, rows }) {
   return (
     <div>
@@ -2375,6 +2543,11 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
     providerCoverage,
     periodComparison,
   ]);
+  const campaignActions = useMemo(() => buildCampaignActions({
+    campaigns,
+    total,
+    periodComparison,
+  }), [campaigns, total, periodComparison]);
   const latestRun = syncRuns[0];
   const detailSections = [
     { key: 'ad_group', title: LEVEL_LABELS.ad_group, rows: topAdGroups },
@@ -2540,6 +2713,14 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div>
+        <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <h3 className="text-sm font-semibold text-slate-800">Akční shortlist kampaní</h3>
+          <div className="text-xs text-slate-500">Co bych řešil jako první při řízení PPC</div>
+        </div>
+        <CampaignActionTable actions={campaignActions} />
       </div>
 
       <div>
