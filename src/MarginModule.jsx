@@ -22,7 +22,7 @@ const MARKET_LABELS = {
 };
 
 const toNumber = (value) => {
-  const n = Number(value);
+  const n = Number(String(value ?? 0).replace(',', '.'));
   return Number.isFinite(n) ? n : 0;
 };
 
@@ -63,6 +63,7 @@ const createBucket = ({ key = '', date = null, market = null } = {}) => ({
   exactOrders: 0,
   incompleteOrders: 0,
   revenue: 0,
+  shippingRevenue: 0,
   cost: 0,
   grossProfit: 0,
   incompleteRevenue: 0,
@@ -79,6 +80,7 @@ const calculateOrderMargin = (order) => {
   const products = Array.isArray(order.raw_data?.products) ? order.raw_data.products : [];
   const currency = getOrderCurrency(order);
   const rate = CURRENCY_RATES[currency] || 1;
+  const shippingRevenue = toNumber(order.raw_data?.shipment?.price_without_vat) * rate;
 
   let revenueNative = 0;
   let costNative = 0;
@@ -102,6 +104,7 @@ const calculateOrderMargin = (order) => {
 
   return {
     revenue,
+    shippingRevenue,
     cost,
     grossProfit,
     grossProfitPct: revenue ? (grossProfit / revenue) * 100 : 0,
@@ -117,6 +120,7 @@ const calculateOrderMargin = (order) => {
 
 const addMargin = (bucket, margin) => {
   bucket.orders += 1;
+  bucket.shippingRevenue += margin.shippingRevenue;
 
   if (margin.complete) {
     bucket.exactOrders += 1;
@@ -140,6 +144,7 @@ const MarginChartTooltip = ({ active, payload }) => {
       <div className="mt-1 text-slate-600">Hrubý zisk: <span className="font-semibold text-slate-800">{formatCurrency(row.grossProfit)}</span></div>
       <div className="text-slate-600">Hrubý zisk %: <span className="font-semibold text-slate-800">{formatPercent(row.grossProfitPct)}</span></div>
       <div className="text-slate-600">Tržba zboží: <span className="font-semibold text-slate-800">{formatCurrency(row.revenue)}</span></div>
+      <div className="text-slate-600">Tržba z poštovného: <span className="font-semibold text-slate-800">{formatCurrency(row.shippingRevenue)}</span></div>
       <div className="text-slate-600">Nákupka: <span className="font-semibold text-slate-800">{formatCurrency(row.cost)}</span></div>
       <div className="mt-1 text-slate-500">Přesné obj.: {formatNumber(row.exactOrders)} / {formatNumber(row.orders)}</div>
       {row.incompleteOrders > 0 && (
@@ -284,7 +289,7 @@ export default function MarginModule({ orders, dateFrom, dateTo, country }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
         <MarginKPI
           title="Hrubý zisk %"
           value={formatPercent(total.grossProfitPct)}
@@ -293,6 +298,7 @@ export default function MarginModule({ orders, dateFrom, dateTo, country }) {
         />
         <MarginKPI title="Hrubý zisk" value={formatCurrency(total.grossProfit)} sub="jen přesná nákupka" tone="emerald" />
         <MarginKPI title="Tržba zboží bez DPH" value={formatCurrency(total.revenue)} sub="bez dopravy a platby" tone="blue" />
+        <MarginKPI title="Tržba z poštovného" value={formatCurrency(total.shippingRevenue)} sub="bez DPH" tone="amber" />
         <MarginKPI title="Nákupka bez DPH" value={formatCurrency(total.cost)} sub="buy_price × množství" />
         <MarginKPI
           title="Pokrytí nákupkou"
@@ -313,7 +319,7 @@ export default function MarginModule({ orders, dateFrom, dateTo, country }) {
             </div>
           </div>
           {stats.rangeIncludesToday && today && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 flex-1">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 flex-1">
               <div className="rounded-lg bg-white/70 border border-blue-100 p-3">
                 <div className="text-xs text-blue-600">Hrubý zisk %</div>
                 <div className="text-xl font-bold text-blue-900">{formatPercent(today.grossProfitPct)}</div>
@@ -325,6 +331,10 @@ export default function MarginModule({ orders, dateFrom, dateTo, country }) {
               <div className="rounded-lg bg-white/70 border border-blue-100 p-3">
                 <div className="text-xs text-blue-600">Tržba zboží</div>
                 <div className="text-xl font-bold text-blue-900">{formatCurrency(today.revenue)}</div>
+              </div>
+              <div className="rounded-lg bg-white/70 border border-blue-100 p-3">
+                <div className="text-xs text-blue-600">Poštovné</div>
+                <div className="text-xl font-bold text-blue-900">{formatCurrency(today.shippingRevenue)}</div>
               </div>
               <div className="rounded-lg bg-white/70 border border-blue-100 p-3">
                 <div className="text-xs text-blue-600">Přesnost</div>
@@ -386,7 +396,7 @@ export default function MarginModule({ orders, dateFrom, dateTo, country }) {
           <h3 className="text-sm font-semibold text-slate-800">Marže dle země</h3>
         </div>
         <div className="overflow-x-auto">
-          <table className="min-w-[760px] w-full text-xs">
+          <table className="min-w-[860px] w-full text-xs">
             <thead className="bg-slate-100 text-slate-600">
               <tr>
                 <th className="text-left px-3 py-2 font-semibold">Země</th>
@@ -394,6 +404,7 @@ export default function MarginModule({ orders, dateFrom, dateTo, country }) {
                 <th className="text-right px-3 py-2 font-semibold">Přesné</th>
                 <th className="text-right px-3 py-2 font-semibold">Chybí</th>
                 <th className="text-right px-3 py-2 font-semibold">Tržba zboží</th>
+                <th className="text-right px-3 py-2 font-semibold">Poštovné</th>
                 <th className="text-right px-3 py-2 font-semibold">Nákupka</th>
                 <th className="text-right px-3 py-2 font-semibold">Hrubý zisk</th>
                 <th className="text-right px-3 py-2 font-semibold">Hrubý zisk %</th>
@@ -409,6 +420,7 @@ export default function MarginModule({ orders, dateFrom, dateTo, country }) {
                     {formatNumber(row.incompleteOrders)}
                   </td>
                   <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.revenue)}</td>
+                  <td className="px-3 py-2 text-right text-orange-700">{formatCurrency(row.shippingRevenue)}</td>
                   <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.cost)}</td>
                   <td className="px-3 py-2 text-right font-semibold text-emerald-700">{formatCurrency(row.grossProfit)}</td>
                   <td className="px-3 py-2 text-right font-bold text-slate-800">{formatPercent(row.grossProfitPct)}</td>
@@ -416,7 +428,7 @@ export default function MarginModule({ orders, dateFrom, dateTo, country }) {
               ))}
               {!stats.marketRows.length && (
                 <tr>
-                  <td colSpan={8} className="px-3 py-6 text-center text-slate-500">Pro zvolené filtry nejsou dostupná data.</td>
+                  <td colSpan={9} className="px-3 py-6 text-center text-slate-500">Pro zvolené filtry nejsou dostupná data.</td>
                 </tr>
               )}
             </tbody>
@@ -429,7 +441,7 @@ export default function MarginModule({ orders, dateFrom, dateTo, country }) {
           <h3 className="text-sm font-semibold text-slate-800">Marže po dnech</h3>
         </div>
         <div className="max-h-96 overflow-auto">
-          <table className="min-w-[860px] w-full text-xs">
+          <table className="min-w-[960px] w-full text-xs">
             <thead className="sticky top-0 bg-slate-100 text-slate-600">
               <tr>
                 <th className="text-left px-3 py-2 font-semibold">Den</th>
@@ -437,6 +449,7 @@ export default function MarginModule({ orders, dateFrom, dateTo, country }) {
                 <th className="text-right px-3 py-2 font-semibold">Přesné</th>
                 <th className="text-right px-3 py-2 font-semibold">Chybí</th>
                 <th className="text-right px-3 py-2 font-semibold">Tržba zboží</th>
+                <th className="text-right px-3 py-2 font-semibold">Poštovné</th>
                 <th className="text-right px-3 py-2 font-semibold">Nákupka</th>
                 <th className="text-right px-3 py-2 font-semibold">Hrubý zisk</th>
                 <th className="text-right px-3 py-2 font-semibold">Hrubý zisk %</th>
@@ -452,6 +465,7 @@ export default function MarginModule({ orders, dateFrom, dateTo, country }) {
                     {formatNumber(row.incompleteOrders)}
                   </td>
                   <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.revenue)}</td>
+                  <td className="px-3 py-2 text-right text-orange-700">{formatCurrency(row.shippingRevenue)}</td>
                   <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.cost)}</td>
                   <td className="px-3 py-2 text-right font-semibold text-emerald-700">{formatCurrency(row.grossProfit)}</td>
                   <td className="px-3 py-2 text-right font-bold text-slate-800">{formatPercent(row.grossProfitPct)}</td>

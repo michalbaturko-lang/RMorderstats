@@ -92,6 +92,12 @@ const isBigCity = (city, market) => {
 };
 
 const isB2B = (order) => order.raw_data?.customer?.company_yn === true || order.raw_data?.customer?.company_yn === 'true';
+const toNumber = (value) => {
+  const n = Number(String(value ?? 0).replace(',', '.'));
+  return Number.isFinite(n) ? n : 0;
+};
+const getOrderCurrency = (order) => order.currency || order.raw_data?.currency_id || 'CZK';
+const getOrderRate = (order) => CURRENCY_RATES[getOrderCurrency(order)] || 1;
 
 // Výpočet obratu BEZ DPH a BEZ poštovného
 const getRevenueWithoutVAT = (order) => {
@@ -99,11 +105,14 @@ const getRevenueWithoutVAT = (order) => {
   let total = 0;
   products.forEach(p => {
     // price_without_vat je už celková cena za řádek (price_per_unit_without_vat × quantity)
-    total += parseFloat(p.price_without_vat || 0);
+    total += toNumber(p.price_without_vat);
   });
-  // Převod měny
-  const currency = order.currency || 'CZK';
-  return total * (CURRENCY_RATES[currency] || 1);
+  return total * getOrderRate(order);
+};
+
+const getShippingRevenueWithoutVAT = (order) => {
+  const shipment = order.raw_data?.shipment || {};
+  return toNumber(shipment.price_without_vat) * getOrderRate(order);
 };
 
 // Deduplikace objednávek (ochrana proti duplicitním záznamům ze syncu)
@@ -495,6 +504,7 @@ const TimelineTooltip = ({ active, payload, mode }) => {
       <div className="font-semibold text-slate-800">{mode === 'hour' ? row.fullLabel : row.fullDate}</div>
       <div className="mt-1 text-slate-600">Objednávky: <span className="font-semibold text-slate-800">{formatNumber(row.orders)}</span></div>
       <div className="text-slate-600">Obrat (bez DPH/poštovného): <span className="font-semibold text-slate-800">{formatCurrency(row.revenue)}</span></div>
+      <div className="text-slate-600">Tržba z poštovného: <span className="font-semibold text-slate-800">{formatCurrency(row.shippingRevenue)}</span></div>
     </div>
   );
 };
@@ -875,16 +885,18 @@ export default function App() {
   }, [filtered]);
 
   const kpis = useMemo(() => {
-    let cnt = 0, rev = 0, b2b = 0, big = 0;
+    let cnt = 0, rev = 0, shippingRevenue = 0, b2b = 0, big = 0;
     filtered.forEach(o => { 
       cnt++; 
-      rev += getRevenueWithoutVAT(o); 
+      rev += getRevenueWithoutVAT(o);
+      shippingRevenue += getShippingRevenueWithoutVAT(o);
       if (isB2B(o)) b2b++; 
       if (isBigCity(o.raw_data?.customer?.city_invoice, o.market)) big++; 
     });
     return { 
       orders: cnt, 
       revenue: rev, 
+      shippingRevenue,
       aov: cnt ? rev / cnt : 0, 
       b2bPct: cnt ? b2b / cnt * 100 : 0, 
       bigPct: cnt ? big / cnt * 100 : 0 
@@ -938,7 +950,7 @@ export default function App() {
     const from = parseDateFromInput(dateFrom);
     const to = parseDateFromInput(dateTo);
     if (!from || !to || from > to) {
-      return { validRange: false, mode: 'day', data: [], totals: { orders: 0, revenue: 0 } };
+      return { validRange: false, mode: 'day', data: [], totals: { orders: 0, revenue: 0, shippingRevenue: 0 } };
     }
 
     const sameDay =
@@ -953,6 +965,7 @@ export default function App() {
         fullLabel: `${String(h).padStart(2, '0')}:00 - ${String(h).padStart(2, '0')}:59`,
         orders: 0,
         revenue: 0,
+        shippingRevenue: 0,
       }));
 
       filtered.forEach((o) => {
@@ -968,11 +981,16 @@ export default function App() {
         const h = dt.getHours();
         data[h].orders += 1;
         data[h].revenue += getRevenueWithoutVAT(o);
+        data[h].shippingRevenue += getShippingRevenueWithoutVAT(o);
       });
 
       const totals = data.reduce(
-        (acc, row) => ({ orders: acc.orders + row.orders, revenue: acc.revenue + row.revenue }),
-        { orders: 0, revenue: 0 },
+        (acc, row) => ({
+          orders: acc.orders + row.orders,
+          revenue: acc.revenue + row.revenue,
+          shippingRevenue: acc.shippingRevenue + row.shippingRevenue,
+        }),
+        { orders: 0, revenue: 0, shippingRevenue: 0 },
       );
 
       return { validRange: true, mode: 'hour', data, totals };
@@ -990,6 +1008,7 @@ export default function App() {
         fullDate: cursor.toLocaleDateString('cs-CZ', { day: '2-digit', month: '2-digit', year: 'numeric' }),
         orders: 0,
         revenue: 0,
+        shippingRevenue: 0,
       };
       data.push(row);
       byDay.set(key, row);
@@ -1004,15 +1023,56 @@ export default function App() {
       if (!row) return;
       row.orders += 1;
       row.revenue += getRevenueWithoutVAT(o);
+      row.shippingRevenue += getShippingRevenueWithoutVAT(o);
     });
 
     const totals = data.reduce(
-      (acc, row) => ({ orders: acc.orders + row.orders, revenue: acc.revenue + row.revenue }),
-      { orders: 0, revenue: 0 },
+      (acc, row) => ({
+        orders: acc.orders + row.orders,
+        revenue: acc.revenue + row.revenue,
+        shippingRevenue: acc.shippingRevenue + row.shippingRevenue,
+      }),
+      { orders: 0, revenue: 0, shippingRevenue: 0 },
     );
 
     return { validRange: true, mode: 'day', data, totals };
   }, [filtered, dateFrom, dateTo]);
+
+  const timelineMarketBreakdown = useMemo(() => {
+    const byKey = new Map();
+    filtered.forEach((order) => {
+      if (!order.order_date) return;
+      const dt = new Date(order.order_date);
+      if (Number.isNaN(dt.getTime())) return;
+      const dateKey = formatDateForInput(dt);
+      const market = order.market || 'unknown';
+      const key = `${dateKey}|${market}`;
+      if (!byKey.has(key)) {
+        byKey.set(key, {
+          key,
+          dateKey,
+          fullDate: dt.toLocaleDateString('cs-CZ', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+          market,
+          orders: 0,
+          revenue: 0,
+          shippingRevenue: 0,
+        });
+      }
+      const row = byKey.get(key);
+      row.orders += 1;
+      row.revenue += getRevenueWithoutVAT(order);
+      row.shippingRevenue += getShippingRevenueWithoutVAT(order);
+    });
+
+    return Array.from(byKey.values()).sort((a, b) => {
+      const dateCompare = b.dateKey.localeCompare(a.dateKey);
+      if (dateCompare) return dateCompare;
+      const ai = MARKET_ORDER.indexOf(a.market);
+      const bi = MARKET_ORDER.indexOf(b.market);
+      if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+      return a.market.localeCompare(b.market);
+    });
+  }, [filtered]);
 
   const tempoDailyRecords = useMemo(() => {
     const byKey = new Map();
@@ -1440,9 +1500,10 @@ export default function App() {
         </div>
 
         {/* KPIs */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
           <KPICard title="Objednávky" value={formatNumber(kpis.orders)} icon="🛒" />
           <KPICard title="Obrat (bez DPH)" value={formatCurrency(kpis.revenue)} icon="💰" sub={adsPnoSub} subTone={hasAdsData ? 'red' : 'muted'} />
+          <KPICard title="Tržba z poštovného" value={formatCurrency(kpis.shippingRevenue)} icon="🚚" sub="bez DPH, mimo PNO" />
           <KPICard title="Ø Objednávka" value={formatCurrency(kpis.aov)} icon="📦" />
           <KPICard title="B2B podíl" value={`${kpis.b2bPct.toFixed(0)}%`} icon="🏢" sub={`🏙️ Velká města: ${kpis.bigPct.toFixed(0)}%`} />
         </div>
@@ -1578,6 +1639,9 @@ export default function App() {
                           <div className="px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700">
                             Obrat: {formatCurrency(timelineSeries.totals.revenue)}
                           </div>
+                          <div className="px-2.5 py-1 rounded-lg bg-orange-50 border border-orange-200 text-xs text-orange-700">
+                            Poštovné: {formatCurrency(timelineSeries.totals.shippingRevenue)}
+                          </div>
                         </div>
 
                         <div className="h-72 rounded-lg border border-slate-200 bg-slate-50 p-2">
@@ -1629,6 +1693,16 @@ export default function App() {
                                 dot={false}
                                 activeDot={{ r: 4 }}
                               />
+                              <Line
+                                yAxisId="revenue"
+                                type="monotone"
+                                dataKey="shippingRevenue"
+                                name="Poštovné (Kč)"
+                                stroke="#f97316"
+                                strokeWidth={2}
+                                dot={false}
+                                activeDot={{ r: 4 }}
+                              />
                             </ComposedChart>
                           </ResponsiveContainer>
                         </div>
@@ -1641,6 +1715,7 @@ export default function App() {
                                   <th className="text-left px-3 py-2 font-semibold">{timelineSeries.mode === 'hour' ? 'Hodina' : 'Den'}</th>
                                   <th className="text-right px-3 py-2 font-semibold">Objednávky</th>
                                   <th className="text-right px-3 py-2 font-semibold">Obrat (bez DPH/poštovného)</th>
+                                  <th className="text-right px-3 py-2 font-semibold">Tržba z poštovného</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -1649,8 +1724,44 @@ export default function App() {
                                     <td className="px-3 py-2 text-slate-700">{timelineSeries.mode === 'hour' ? row.fullLabel : row.fullDate}</td>
                                     <td className="px-3 py-2 text-right text-slate-700">{formatNumber(row.orders)}</td>
                                     <td className="px-3 py-2 text-right font-medium text-slate-800">{formatCurrency(row.revenue)}</td>
+                                    <td className="px-3 py-2 text-right font-medium text-orange-700">{formatCurrency(row.shippingRevenue)}</td>
                                   </tr>
                                 ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 rounded-lg border border-slate-200 overflow-hidden">
+                          <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
+                            <h4 className="text-xs font-semibold text-slate-700">Tržba z poštovného podle dne a země</h4>
+                          </div>
+                          <div className="max-h-64 overflow-auto">
+                            <table className="min-w-[620px] w-full text-xs">
+                              <thead className="sticky top-0 bg-slate-100 text-slate-600">
+                                <tr>
+                                  <th className="text-left px-3 py-2 font-semibold">Den</th>
+                                  <th className="text-left px-3 py-2 font-semibold">Země</th>
+                                  <th className="text-right px-3 py-2 font-semibold">Obj.</th>
+                                  <th className="text-right px-3 py-2 font-semibold">Obrat zboží</th>
+                                  <th className="text-right px-3 py-2 font-semibold">Tržba z poštovného</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {timelineMarketBreakdown.map((row) => (
+                                  <tr key={row.key} className="border-t border-slate-100 odd:bg-white even:bg-slate-50/60">
+                                    <td className="px-3 py-2 text-slate-700">{row.fullDate}</td>
+                                    <td className="px-3 py-2 font-medium text-slate-800">{MARKET_LABELS[row.market] || row.market}</td>
+                                    <td className="px-3 py-2 text-right text-slate-700">{formatNumber(row.orders)}</td>
+                                    <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.revenue)}</td>
+                                    <td className="px-3 py-2 text-right font-semibold text-orange-700">{formatCurrency(row.shippingRevenue)}</td>
+                                  </tr>
+                                ))}
+                                {!timelineMarketBreakdown.length && (
+                                  <tr>
+                                    <td colSpan={5} className="px-3 py-6 text-center text-slate-500">Pro zvolené filtry nejsou dostupná data.</td>
+                                  </tr>
+                                )}
                               </tbody>
                             </table>
                           </div>

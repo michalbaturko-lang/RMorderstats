@@ -87,6 +87,7 @@ function emptyOrderMetrics() {
     exactOrders: 0,
     missingCostOrders: 0,
     revenue: 0,
+    shippingRevenue: 0,
     exactRevenue: 0,
     exactCost: 0,
     exactGrossProfit: 0,
@@ -127,17 +128,19 @@ function addOrderMetrics(target, order, fxRates) {
   }
 
   const revenueCzk = revenue * rate;
+  const shippingRevenueCzk = toNumber(order.raw_data?.shipment?.price_without_vat) * rate;
   const costCzk = cost * rate;
 
   target.orders += 1;
   target.revenue += revenueCzk;
+  target.shippingRevenue += shippingRevenueCzk;
 
   if (products.length && revenueCzk > 0 && missingItems === 0) {
     target.exactOrders += 1;
     target.exactRevenue += revenueCzk;
     target.exactCost += costCzk;
     target.exactGrossProfit += revenueCzk - costCzk;
-  } else if (products.length) {
+  } else if (products.length && missingItems > 0) {
     target.missingCostOrders += 1;
     target.missingCostItems += missingItems;
   }
@@ -259,6 +262,7 @@ function aggregateOrderByMarket(rows) {
     target.exactOrders += toNumber(row.exactOrders ?? row.exact_orders);
     target.missingCostOrders += toNumber(row.missingCostOrders ?? row.missing_cost_orders);
     target.revenue += toNumber(row.revenue ?? row.revenue_czk);
+    target.shippingRevenue += toNumber(row.shippingRevenue ?? row.shipping_revenue_czk);
     target.exactRevenue += toNumber(row.exactRevenue ?? row.exact_revenue_czk);
     target.exactCost += toNumber(row.exactCost ?? row.exact_cost_czk);
     target.exactGrossProfit += toNumber(row.exactGrossProfit ?? row.exact_gross_profit_czk);
@@ -286,6 +290,7 @@ function aggregateBusinessRows(rows, keyFields) {
     target.exactOrders += toNumber(row.exactOrders ?? row.exact_orders);
     target.missingCostOrders += toNumber(row.missingCostOrders ?? row.missing_cost_orders);
     target.revenue += toNumber(row.revenue ?? row.real_revenue_czk);
+    target.shippingRevenue += toNumber(row.shippingRevenue ?? row.shipping_revenue_czk);
     target.exactRevenue += toNumber(row.exactRevenue ?? row.exact_revenue_czk);
     target.exactCost += toNumber(row.exactCost ?? row.exact_cost_czk);
     target.exactGrossProfit += toNumber(row.exactGrossProfit ?? row.exact_gross_profit_czk);
@@ -304,6 +309,7 @@ function expectedBusinessRows({ adRows, orderRows, keyFields }) {
       exactOrders: orders.exactOrders,
       missingCostOrders: orders.missingCostOrders,
       revenue: orders.revenue,
+      shippingRevenue: orders.shippingRevenue,
       exactRevenue: orders.exactRevenue,
       exactCost: orders.exactCost,
       exactGrossProfit: orders.exactGrossProfit,
@@ -324,6 +330,7 @@ function expectedBusinessRows({ adRows, orderRows, keyFields }) {
         exactOrders: orders.exactOrders,
         missingCostOrders: orders.missingCostOrders,
         revenue: orders.revenue,
+        shippingRevenue: orders.shippingRevenue,
         exactRevenue: orders.exactRevenue,
         exactCost: orders.exactCost,
         exactGrossProfit: orders.exactGrossProfit,
@@ -356,6 +363,7 @@ function compareOrderAggregates(expectedRows, actualRows) {
     compareNumber(`${expected.market} exactOrders`, expected.exactOrders, actual.exactOrders, 0, failures);
     compareNumber(`${expected.market} missingCostOrders`, expected.missingCostOrders, actual.missingCostOrders, 0, failures);
     compareNumber(`${expected.market} revenue`, expected.revenue, actual.revenue, 0.5, failures);
+    compareNumber(`${expected.market} shippingRevenue`, expected.shippingRevenue, actual.shippingRevenue, 0.5, failures);
     compareNumber(`${expected.market} exactCost`, expected.exactCost, actual.exactCost, 0.5, failures);
     compareNumber(`${expected.market} exactGrossProfit`, expected.exactGrossProfit, actual.exactGrossProfit, 0.5, failures);
   }
@@ -376,6 +384,7 @@ function compareBusinessAggregates(expectedRows, actualRows, keyFields) {
     }
     compareNumber(`${key} spend`, expected.spend, actual.spend, 0.5, failures);
     compareNumber(`${key} revenue`, expected.revenue, actual.revenue, 0.5, failures);
+    compareNumber(`${key} shippingRevenue`, expected.shippingRevenue, actual.shippingRevenue, 0.5, failures);
     compareNumber(`${key} exactGrossProfit`, expected.exactGrossProfit, actual.exactGrossProfit, 0.5, failures);
     compareNumber(`${key} grossProfitAfterAds`, expected.grossProfitAfterAds, actual.grossProfitAfterAds, 0.5, failures);
     compareNumber(`${key} orders`, expected.orders, actual.orders, 0, failures);
@@ -393,6 +402,7 @@ function printOrderSummary(rows) {
       `orders=${formatNumber(row.orders)}`,
       `exact=${formatNumber(row.exactOrders)}`,
       `revenue=${formatCurrency(row.revenue)}`,
+      `shipping_revenue=${formatCurrency(row.shippingRevenue)}`,
       `gross_profit=${formatCurrency(row.exactGrossProfit)}`,
       `gross_profit_pct=${formatPercent(grossProfitPct)}`,
     ].join(' | '));
@@ -450,7 +460,7 @@ async function main() {
       supabaseUrl,
       serviceRoleKey,
       table: 'order_business_daily_summary',
-      select: 'date,market,orders,exact_orders,missing_cost_orders,missing_cost_items,revenue_czk,exact_revenue_czk,exact_cost_czk,exact_gross_profit_czk',
+      select: 'date,market,orders,exact_orders,missing_cost_orders,missing_cost_items,revenue_czk,shipping_revenue_czk,exact_revenue_czk,exact_cost_czk,exact_gross_profit_czk',
       filters: viewFilters,
       orderBy: 'date.asc',
     }),
@@ -458,7 +468,7 @@ async function main() {
       supabaseUrl,
       serviceRoleKey,
       table: 'marketing_business_provider_daily_summary',
-      select: 'date,market,provider,spend_czk,impressions,clicks,interactions,conversions,conversion_value_czk,orders,exact_orders,missing_cost_orders,real_revenue_czk,exact_revenue_czk,exact_cost_czk,exact_gross_profit_czk,gross_profit_after_ads_czk,pno,real_roas',
+      select: 'date,market,provider,spend_czk,impressions,clicks,interactions,conversions,conversion_value_czk,orders,exact_orders,missing_cost_orders,real_revenue_czk,shipping_revenue_czk,exact_revenue_czk,exact_cost_czk,exact_gross_profit_czk,gross_profit_after_ads_czk,pno,real_roas',
       filters: {
         ...viewFilters,
         provider: `in.(${providers.join(',')})`,
@@ -469,7 +479,7 @@ async function main() {
       supabaseUrl,
       serviceRoleKey,
       table: 'marketing_business_daily_total',
-      select: 'date,market,spend_czk,impressions,clicks,interactions,conversions,conversion_value_czk,orders,exact_orders,missing_cost_orders,real_revenue_czk,exact_revenue_czk,exact_cost_czk,exact_gross_profit_czk,gross_profit_after_ads_czk,pno,real_roas',
+      select: 'date,market,spend_czk,impressions,clicks,interactions,conversions,conversion_value_czk,orders,exact_orders,missing_cost_orders,real_revenue_czk,shipping_revenue_czk,exact_revenue_czk,exact_cost_czk,exact_gross_profit_czk,gross_profit_after_ads_czk,pno,real_roas',
       filters: viewFilters,
       orderBy: 'date.asc',
     }),

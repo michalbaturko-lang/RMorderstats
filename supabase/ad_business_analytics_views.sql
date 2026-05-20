@@ -34,7 +34,12 @@ clean_orders as (
       when 'HUF' then 0.063::numeric
       when 'RON' then 5.1::numeric
       else 1::numeric
-    end as fx_rate
+    end as fx_rate,
+    case
+      when replace(coalesce(raw_data -> 'shipment' ->> 'price_without_vat', ''), ',', '.') ~ '^-?[0-9]+(\.[0-9]+)?$'
+        then replace(coalesce(raw_data -> 'shipment' ->> 'price_without_vat', ''), ',', '.')::numeric
+      else 0::numeric
+    end as shipping_revenue_native
   from deduped_orders
   where coalesce(upper(status), '') <> 'STORNO'
     and coalesce(upper(raw_data ->> 'status'), '') <> 'STORNO'
@@ -46,6 +51,7 @@ order_products as (
     o.market,
     o.currency,
     o.fx_rate,
+    o.shipping_revenue_native,
     product.value as product
   from clean_orders o
   left join lateral jsonb_array_elements(
@@ -62,6 +68,7 @@ line_values as (
     market,
     currency,
     fx_rate,
+    shipping_revenue_native,
     product,
     replace(coalesce(product ->> 'price_without_vat', ''), ',', '.') as price_without_vat_raw,
     replace(coalesce(product ->> 'quantity', ''), ',', '.') as quantity_raw,
@@ -75,6 +82,7 @@ parsed_lines as (
     market,
     currency,
     fx_rate,
+    shipping_revenue_native,
     product,
     case
       when price_without_vat_raw ~ '^-?[0-9]+(\.[0-9]+)?$' then price_without_vat_raw::numeric
@@ -102,6 +110,7 @@ order_metrics as (
     fx_rate,
     count(product) as product_rows,
     coalesce(sum(revenue_native), 0) as revenue_native,
+    max(shipping_revenue_native) as shipping_revenue_native,
     coalesce(sum(
       case
         when buy_price_native > 0 then buy_price_native * quantity
@@ -126,6 +135,7 @@ daily as (
     sum(product_rows) as product_rows,
     sum(missing_cost_items) as missing_cost_items,
     round(sum(revenue_native * fx_rate), 2) as revenue_czk,
+    round(sum(shipping_revenue_native * fx_rate), 2) as shipping_revenue_czk,
     round(sum(
       case
         when product_rows > 0 and revenue_native > 0 and missing_cost_items = 0 then revenue_native * fx_rate
@@ -166,7 +176,8 @@ select
   case
     when orders > 0 then round((exact_orders::numeric / orders::numeric) * 100, 4)
     else 0
-  end as exact_order_share_pct
+  end as exact_order_share_pct,
+  shipping_revenue_czk
 from daily;
 
 create or replace view public.marketing_business_provider_daily_summary
@@ -203,7 +214,8 @@ select
   case
     when coalesce(orders.exact_gross_profit_czk, 0) > 0 then round((coalesce(ads.spend_czk, 0) / orders.exact_gross_profit_czk) * 100, 4)
     else 0
-  end as spend_to_gross_profit_pct
+  end as spend_to_gross_profit_pct,
+  coalesce(orders.shipping_revenue_czk, 0) as shipping_revenue_czk
 from public.marketing_daily_summary ads
 left join public.order_business_daily_summary orders
   on orders.date = ads.date
@@ -264,7 +276,8 @@ select
   case
     when coalesce(orders.exact_gross_profit_czk, 0) > 0 then round((coalesce(ads.spend_czk, 0) / orders.exact_gross_profit_czk) * 100, 4)
     else 0
-  end as spend_to_gross_profit_pct
+  end as spend_to_gross_profit_pct,
+  coalesce(orders.shipping_revenue_czk, 0) as shipping_revenue_czk
 from ads
 full outer join public.order_business_daily_summary orders
   on orders.date = ads.date
