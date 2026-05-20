@@ -1,0 +1,75 @@
+name: Check Marketing Analytics Status
+
+on:
+  schedule:
+    - cron: '25 4 * * *'
+  workflow_dispatch:
+    inputs:
+      providers:
+        description: 'Expected providers, for example google_ads or google_ads,meta_ads'
+        required: false
+        default: 'google_ads,meta_ads'
+      markets:
+        description: 'Expected markets, for example cz,sk,hu,ro'
+        required: false
+        default: 'cz,sk,hu,ro'
+      from_date:
+        description: 'Historical coverage start date YYYY-MM-DD'
+        required: false
+        default: ''
+      to_date:
+        description: 'Historical coverage end date YYYY-MM-DD'
+        required: false
+        default: ''
+      health_date:
+        description: 'Current coverage date YYYY-MM-DD. Defaults to yesterday UTC.'
+        required: false
+        default: ''
+      require_complete:
+        description: 'Fail while expected blockers remain. Keep 0 until Meta and business views are connected.'
+        required: false
+        default: '0'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run verify:ads-readonly
+
+      - name: Check marketing analytics operational status
+        run: npm run check:marketing-analytics-status
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+
+          GOOGLE_ADS_DEVELOPER_TOKEN: ${{ secrets.GOOGLE_ADS_DEVELOPER_TOKEN }}
+          GOOGLE_ADS_CLIENT_ID: ${{ secrets.GOOGLE_ADS_CLIENT_ID }}
+          GOOGLE_ADS_CLIENT_SECRET: ${{ secrets.GOOGLE_ADS_CLIENT_SECRET }}
+          GOOGLE_ADS_REFRESH_TOKEN: ${{ secrets.GOOGLE_ADS_REFRESH_TOKEN }}
+          GOOGLE_ADS_BASE44_APP_ID: ${{ secrets.GOOGLE_ADS_BASE44_APP_ID }}
+          GOOGLE_ADS_BASE44_ACCESS_TOKEN: ${{ secrets.GOOGLE_ADS_BASE44_ACCESS_TOKEN }}
+          GOOGLE_ADS_BASE44_TOKEN_ACCOUNT_ID: ${{ secrets.GOOGLE_ADS_BASE44_TOKEN_ACCOUNT_ID }}
+          GOOGLE_ADS_ACCOUNTS_JSON: ${{ secrets.GOOGLE_ADS_ACCOUNTS_JSON }}
+
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          META_ADS_ACCOUNTS_JSON: ${{ secrets.META_ADS_ACCOUNTS_JSON }}
+
+          MARKETING_STATUS_PROVIDERS: ${{ github.event.inputs.providers || vars.MARKETING_STATUS_PROVIDERS || 'google_ads,meta_ads' }}
+          MARKETING_STATUS_MARKETS: ${{ github.event.inputs.markets || vars.SYNC_MARKETS || 'cz,sk,hu,ro' }}
+          MARKETING_STATUS_FROM_DATE: ${{ github.event.inputs.from_date || '' }}
+          MARKETING_STATUS_TO_DATE: ${{ github.event.inputs.to_date || '' }}
+          MARKETING_STATUS_HEALTH_DATE: ${{ github.event.inputs.health_date || '' }}
+          MARKETING_STATUS_DETAIL_LEVELS: ${{ vars.MARKETING_STATUS_DETAIL_LEVELS || vars.GOOGLE_ADS_DETAIL_LEVELS || 'device,hour,ad_group,ad,keyword,search_term,shopping_product,geo,conversion_action' }}
+          MARKETING_STATUS_REQUIRE_COMPLETE: ${{ github.event.inputs.require_complete || '0' }}
