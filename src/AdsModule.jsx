@@ -91,6 +91,15 @@ const isMissingViewError = (error) => {
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
   return /PGRST205|PGRST204|schema cache|could not find|relation .* does not exist/i.test(text);
 };
+const syncTypeLevels = (syncType) => {
+  const [, rawLevels = ''] = String(syncType || '').split(':');
+  return rawLevels.split(',').map((level) => level.trim()).filter(Boolean);
+};
+const isDeepDetailRun = (run) => (
+  String(run?.sync_type || '').startsWith('detail:') &&
+  syncTypeLevels(run.sync_type).some((level) => level !== 'campaign')
+);
+const isCampaignSyncRun = (run) => syncTypeLevels(run?.sync_type).includes('campaign');
 
 const emptyMetrics = () => ({
   spend: 0,
@@ -517,6 +526,8 @@ function aggregateProviderCoverage(campaignRows, detailRows, syncRuns, dateFrom,
     expectedDays,
     lastDataDate: null,
     latestRun: null,
+    latestCampaignRun: null,
+    latestDeepDetailRun: null,
     ...emptyMetrics(),
   }]));
 
@@ -529,6 +540,8 @@ function aggregateProviderCoverage(campaignRows, detailRows, syncRuns, dateFrom,
       expectedDays,
       lastDataDate: null,
       latestRun: null,
+      latestCampaignRun: null,
+      latestDeepDetailRun: null,
       ...emptyMetrics(),
     };
     target.campaignRows += 1;
@@ -549,6 +562,8 @@ function aggregateProviderCoverage(campaignRows, detailRows, syncRuns, dateFrom,
       expectedDays,
       lastDataDate: null,
       latestRun: null,
+      latestCampaignRun: null,
+      latestDeepDetailRun: null,
       ...emptyMetrics(),
     };
     target.detailRows += 1;
@@ -557,7 +572,10 @@ function aggregateProviderCoverage(campaignRows, detailRows, syncRuns, dateFrom,
 
   for (const run of syncRuns) {
     const target = byProvider.get(run.provider);
-    if (target && !target.latestRun) target.latestRun = run;
+    if (!target) continue;
+    if (!target.latestRun) target.latestRun = run;
+    if (!target.latestCampaignRun && isCampaignSyncRun(run)) target.latestCampaignRun = run;
+    if (!target.latestDeepDetailRun && isDeepDetailRun(run)) target.latestDeepDetailRun = run;
   }
 
   return Array.from(byProvider.values()).map((row) => ({
@@ -565,6 +583,7 @@ function aggregateProviderCoverage(campaignRows, detailRows, syncRuns, dateFrom,
     days: row.dates.size,
     coveragePct: expectedDays ? (row.dates.size / expectedDays) * 100 : 0,
     hasData: row.campaignRows > 0 || row.spend > 0,
+    hasDeepDetail: row.detailRows > 0 || Boolean(row.latestDeepDetailRun),
   }));
 }
 
@@ -982,19 +1001,25 @@ function InsightCard({ item }) {
 }
 
 function ProviderCoverageCard({ row }) {
-  const run = row.latestRun;
   const completeEnough = row.coveragePct >= 95;
   const tone = row.hasData && completeEnough
     ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
     : row.hasData
       ? 'border-blue-200 bg-blue-50 text-blue-900'
     : 'border-amber-200 bg-amber-50 text-amber-900';
+  const statusLabel = row.hasData
+    ? (completeEnough ? 'DATA OK' : 'ČÁSTEČNÉ')
+    : row.provider === 'meta_ads'
+      ? 'ČEKÁ'
+      : 'BEZ DAT';
+  const campaignRun = row.latestCampaignRun;
+  const detailRun = row.latestDeepDetailRun;
 
   return (
     <div className={`rounded-lg border p-3 ${tone}`}>
       <div className="flex items-center justify-between gap-3">
         <div className="text-sm font-bold">{providerLabel(row.provider)}</div>
-        <StatusBadge value={row.hasData ? (completeEnough ? 'DATA OK' : 'ČÁSTEČNÉ') : 'BEZ DAT'} />
+        <StatusBadge value={statusLabel} />
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
         <div>
@@ -1014,10 +1039,21 @@ function ProviderCoverageCard({ row }) {
           <div className="font-semibold">{formatNumber(row.detailRows)}</div>
         </div>
       </div>
-      <div className="mt-2 text-xs leading-relaxed opacity-80">
-        {run
-          ? `Poslední sync ${run.status}: ${run.range_from} až ${run.range_to}, ${formatNumber(run.rows_upserted)} řádků, ${formatDateTime(run.finished_at || run.started_at)}`
-          : 'Zatím bez uloženého sync běhu.'}
+      <div className="mt-2 space-y-1 text-xs leading-relaxed opacity-80">
+        <div>
+          {campaignRun
+            ? `Spend sync ${campaignRun.status}: ${campaignRun.range_from} až ${campaignRun.range_to}, ${formatNumber(campaignRun.rows_upserted)} řádků, ${formatDateTime(campaignRun.finished_at || campaignRun.started_at)}`
+            : row.provider === 'meta_ads'
+              ? 'Spend sync čeká na Meta přístup.'
+              : 'Spend sync zatím nemá uložený běh.'}
+        </div>
+        <div>
+          {detailRun
+            ? `Deep detail ${detailRun.status}: ${detailRun.range_from} až ${detailRun.range_to}, ${formatNumber(detailRun.rows_upserted)} řádků, ${formatDateTime(detailRun.finished_at || detailRun.started_at)}`
+            : row.provider === 'meta_ads'
+              ? 'Deep detail čeká na Meta přístup.'
+              : 'Deep detail zatím nemá uložený běh.'}
+        </div>
       </div>
     </div>
   );
@@ -1278,7 +1314,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
         .from('ad_sync_runs')
         .select('provider,sync_type,range_from,range_to,status,rows_upserted,warnings,error_message,started_at,finished_at')
         .order('started_at', { ascending: false })
-        .limit(12);
+        .limit(80);
 
       const businessDailyQuery = applyMarket(
         supabaseClient
