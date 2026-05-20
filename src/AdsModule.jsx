@@ -57,6 +57,7 @@ const DETAIL_COVERAGE_LEVELS = [
   'placement',
 ];
 const DETAIL_LEVEL_ROW_LIMIT = 700;
+const MAX_CAMPAIGN_SYNC_AGE_MINUTES = 45;
 
 const toNumber = (value) => {
   const number = Number(value || 0);
@@ -88,6 +89,15 @@ const formatDateTime = (value) => {
   if (Number.isNaN(date.getTime())) return String(value);
   return date.toLocaleString('cs-CZ', { dateStyle: 'short', timeStyle: 'short' });
 };
+const syncRunTimestamp = (run) => run?.finished_at || run?.started_at || '';
+const syncAgeMinutes = (run) => {
+  const timestamp = new Date(syncRunTimestamp(run)).getTime();
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return Number.POSITIVE_INFINITY;
+  return (Date.now() - timestamp) / 60_000;
+};
+const formatAgeMinutes = (value) => Number.isFinite(value)
+  ? `${toNumber(value).toFixed(1).replace('.', ',')} min`
+  : 'bez syncu';
 const formatSignedPercent = (value) => `${toNumber(value) > 0 ? '+' : ''}${toNumber(value).toFixed(1)} %`;
 const isMissingViewError = (error) => {
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
@@ -1119,6 +1129,15 @@ function InsightCard({ item }) {
 
 function ProviderCoverageCard({ row }) {
   const completeEnough = row.coveragePct >= 95;
+  const campaignRun = row.latestCampaignRun;
+  const detailRun = row.latestDeepDetailRun;
+  const campaignAge = syncAgeMinutes(campaignRun);
+  const campaignFresh = Boolean(campaignRun && campaignRun.status === 'success' && campaignAge <= MAX_CAMPAIGN_SYNC_AGE_MINUTES);
+  const campaignFreshnessLabel = campaignRun
+    ? (campaignFresh ? 'fresh' : 'opožděné')
+    : row.provider === 'meta_ads'
+      ? 'čeká'
+      : 'bez syncu';
   const tone = row.hasData && completeEnough
     ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
     : row.hasData
@@ -1129,8 +1148,6 @@ function ProviderCoverageCard({ row }) {
     : row.provider === 'meta_ads'
       ? 'ČEKÁ'
       : 'BEZ DAT';
-  const campaignRun = row.latestCampaignRun;
-  const detailRun = row.latestDeepDetailRun;
 
   return (
     <div className={`rounded-lg border p-3 ${tone}`}>
@@ -1158,18 +1175,25 @@ function ProviderCoverageCard({ row }) {
             <div className="opacity-70">top načteno {formatNumber(row.detailRowsLoaded)}</div>
           )}
         </div>
+        <div>
+          <div className="opacity-70">Čerstvost spendu</div>
+          <div className={`font-semibold ${campaignFresh ? 'text-emerald-700' : row.provider === 'meta_ads' && !campaignRun ? '' : 'text-amber-700'}`}>
+            {campaignFreshnessLabel}
+          </div>
+          <div className="opacity-70">{campaignRun ? `${formatAgeMinutes(campaignAge)} / limit ${formatNumber(MAX_CAMPAIGN_SYNC_AGE_MINUTES)} min` : 'čeká na první běh'}</div>
+        </div>
       </div>
       <div className="mt-2 space-y-1 text-xs leading-relaxed opacity-80">
         <div>
           {campaignRun
-            ? `Spend sync ${campaignRun.status}: ${campaignRun.range_from} až ${campaignRun.range_to}, ${formatNumber(campaignRun.rows_upserted)} řádků, ${formatDateTime(campaignRun.finished_at || campaignRun.started_at)}`
+            ? `Spend sync ${campaignRun.status}: ${campaignRun.range_from} až ${campaignRun.range_to}, ${formatNumber(campaignRun.rows_upserted)} řádků, ${formatDateTime(syncRunTimestamp(campaignRun))}`
             : row.provider === 'meta_ads'
               ? 'Spend sync čeká na Meta přístup.'
               : 'Spend sync zatím nemá uložený běh.'}
         </div>
         <div>
           {detailRun
-            ? `Deep detail ${detailRun.status}: ${detailRun.range_from} až ${detailRun.range_to}, ${formatNumber(detailRun.rows_upserted)} řádků, ${formatDateTime(detailRun.finished_at || detailRun.started_at)}`
+            ? `Deep detail ${detailRun.status}: ${detailRun.range_from} až ${detailRun.range_to}, ${formatNumber(detailRun.rows_upserted)} řádků, ${formatDateTime(syncRunTimestamp(detailRun))}`
             : row.provider === 'meta_ads'
               ? 'Deep detail čeká na Meta přístup.'
               : 'Deep detail zatím nemá uložený běh.'}
@@ -1225,6 +1249,12 @@ function ReadinessBlockers({ providerCoverage, businessViewState, exactShare }) 
     blockers.push({
       title: 'Google deep detail není kompletní',
       detail: 'Spend běží, ale chybí hlubší vrstvy pro kampaně, search terms, produkty, zařízení nebo geo.',
+    });
+  }
+  if (!google?.latestCampaignRun || google.latestCampaignRun.status !== 'success' || syncAgeMinutes(google.latestCampaignRun) > MAX_CAMPAIGN_SYNC_AGE_MINUTES) {
+    blockers.push({
+      title: 'Google spend sync není čerstvý',
+      detail: `Poslední campaign spend sync musí být mladší než ${formatNumber(MAX_CAMPAIGN_SYNC_AGE_MINUTES)} minut; jinak mohou být dnešní náklady a PNO opožděné.`,
     });
   }
   if (exactShare < 95) {
