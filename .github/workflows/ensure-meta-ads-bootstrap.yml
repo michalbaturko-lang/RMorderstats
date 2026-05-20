@@ -1,0 +1,128 @@
+name: Ensure Meta Ads Bootstrap
+
+on:
+  schedule:
+    - cron: '52 3 * * *'
+  workflow_dispatch:
+    inputs:
+      markets:
+        description: 'Markets, for example cz or cz,sk,hu,ro'
+        required: false
+        default: 'cz,sk,hu,ro'
+      from_date:
+        description: 'Initial backfill start date YYYY-MM-DD'
+        required: false
+        default: '2026-05-01'
+      to_date:
+        description: 'Initial backfill end date YYYY-MM-DD'
+        required: false
+        default: ''
+      days_back:
+        description: 'Readiness rolling window when from/to is empty'
+        required: false
+        default: '7'
+      levels:
+        description: 'Meta levels to verify and sync'
+        required: false
+        default: 'campaign,adset,ad,device,audience,geo,placement'
+      require_insight_rows:
+        description: 'Fail readiness if a Meta insight request returns no rows'
+        required: false
+        default: '0'
+
+concurrency:
+  group: ensure-meta-ads-bootstrap-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run verify:ads-readonly
+
+      - name: Check Meta secrets
+        id: meta-secret
+        run: |
+          if [ -z "${META_ACCESS_TOKEN}" ] || [ -z "${META_ADS_ACCOUNTS_JSON}" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Meta Ads secrets are missing. Add META_ACCESS_TOKEN and META_ADS_ACCOUNTS_JSON; this workflow will then run a read-only readiness check and bootstrap sync."
+            exit 0
+          fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
+        env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          META_ADS_ACCOUNTS_JSON: ${{ secrets.META_ADS_ACCOUNTS_JSON }}
+
+      - name: Check Supabase service secrets
+        id: supabase-secret
+        run: |
+          if [ -z "${SUPABASE_URL}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY}" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Supabase service secrets are missing. Add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY so Meta rows can be stored."
+            exit 0
+          fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+      - name: Check Meta Ads read-only readiness
+        if: steps.meta-secret.outputs.available == 'true' && steps.supabase-secret.outputs.available == 'true'
+        run: npm run check:meta-ads-readiness
+        env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          META_ADS_ACCOUNTS_JSON: ${{ secrets.META_ADS_ACCOUNTS_JSON }}
+          META_GRAPH_API_VERSION: ${{ vars.META_GRAPH_API_VERSION || 'v24.0' }}
+          META_READINESS_DETAIL_LEVELS: ${{ github.event.inputs.levels || vars.META_READINESS_DETAIL_LEVELS || 'campaign,adset,ad,device,audience,geo,placement' }}
+          META_READINESS_REQUIRE_SECRETS: '1'
+          META_READINESS_REQUIRE_INSIGHT_ROWS: ${{ github.event.inputs.require_insight_rows || vars.META_READINESS_REQUIRE_INSIGHT_ROWS || '0' }}
+          FX_RATES_JSON: ${{ vars.FX_RATES_JSON || '{"CZK":1,"EUR":25.2,"HUF":0.063,"RON":5.1}' }}
+          SYNC_MARKETS: ${{ github.event.inputs.markets || vars.SYNC_MARKETS || 'cz,sk,hu,ro' }}
+          SYNC_FROM_DATE: ''
+          SYNC_TO_DATE: ''
+          SYNC_DAYS_BACK: ${{ github.event.inputs.days_back || '7' }}
+
+      - name: Bootstrap Meta Ads historical detail
+        if: steps.meta-secret.outputs.available == 'true' && steps.supabase-secret.outputs.available == 'true'
+        run: npm run sync:ads-analytics
+        env:
+          ADS_SYNC_PROVIDERS: meta_ads
+          ADS_SYNC_SKIP_MISSING_SECRETS: '0'
+          SYNC_MARKETS: ${{ github.event.inputs.markets || vars.SYNC_MARKETS || 'cz,sk,hu,ro' }}
+          SYNC_FROM_DATE: ${{ github.event.inputs.from_date || vars.META_ADS_BOOTSTRAP_FROM_DATE || '2026-05-01' }}
+          SYNC_TO_DATE: ${{ github.event.inputs.to_date || '' }}
+          FX_RATES_JSON: ${{ vars.FX_RATES_JSON || '{"CZK":1,"EUR":25.2,"HUF":0.063,"RON":5.1}' }}
+
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          META_ADS_ACCOUNTS_JSON: ${{ secrets.META_ADS_ACCOUNTS_JSON }}
+          META_GRAPH_API_VERSION: ${{ vars.META_GRAPH_API_VERSION || 'v24.0' }}
+          META_ADS_DETAIL_LEVELS: ${{ github.event.inputs.levels || vars.META_ADS_DETAIL_LEVELS || 'campaign,adset,ad,device,audience,geo,placement' }}
+
+      - name: Summarize Meta Ads coverage
+        if: steps.meta-secret.outputs.available == 'true' && steps.supabase-secret.outputs.available == 'true'
+        run: npm run check:marketing-analytics-status
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          MARKETING_STATUS_PROVIDERS: meta_ads
+          MARKETING_STATUS_MARKETS: ${{ github.event.inputs.markets || vars.SYNC_MARKETS || 'cz,sk,hu,ro' }}
+          MARKETING_STATUS_FROM_DATE: ${{ github.event.inputs.from_date || vars.META_ADS_BOOTSTRAP_FROM_DATE || '2026-05-01' }}
+          MARKETING_STATUS_TO_DATE: ${{ github.event.inputs.to_date || '' }}
+          MARKETING_STATUS_REQUIRE_COMPLETE: '0'
+          FX_RATES_JSON: ${{ vars.FX_RATES_JSON || '{"CZK":1,"EUR":25.2,"HUF":0.063,"RON":5.1}' }}
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          META_ADS_ACCOUNTS_JSON: ${{ secrets.META_ADS_ACCOUNTS_JSON }}

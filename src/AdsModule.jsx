@@ -63,6 +63,7 @@ const toNumber = (value) => {
   const number = Number(value || 0);
   return Number.isFinite(number) ? number : 0;
 };
+const sumBy = (rows, getter) => rows.reduce((sum, row) => sum + toNumber(getter(row)), 0);
 
 const formatNumber = (value) => Math.round(toNumber(value)).toLocaleString('cs-CZ');
 const formatCurrency = (value) => `${formatNumber(value)} Kč`;
@@ -963,6 +964,181 @@ function buildCampaignActions({ campaigns, total, periodComparison }) {
     .slice(0, 10);
 }
 
+function briefCard({ title, status, tone = 'neutral', value, evidence, action }) {
+  return { title, status, tone, value, evidence, action };
+}
+
+function briefTest({ title, hypothesis, check, decision }) {
+  return { title, hypothesis, check, decision };
+}
+
+function buildDecisionBrief({
+  total,
+  businessTotal,
+  orderTotal,
+  campaigns,
+  markets,
+  providerCoverage,
+  detailCoverage,
+  periodComparison,
+  businessViewState,
+}) {
+  const exactShare = orderTotal.orders ? (orderTotal.exactOrders / orderTotal.orders) * 100 : 0;
+  const referenceAov = orderTotal.orders ? businessTotal.realRevenue / orderTotal.orders : total.aov;
+  const minSpend = Math.max(total.spend * 0.04, 300);
+  const lowAovThreshold = referenceAov ? referenceAov * 0.72 : 0;
+  const lowAovCampaigns = campaigns
+    .filter((row) => row.spend >= minSpend && row.conversions >= 2 && row.aov > 0 && lowAovThreshold > 0 && row.aov < lowAovThreshold)
+    .sort((a, b) => b.spend - a.spend);
+  const lowAovSpend = sumBy(lowAovCampaigns, (row) => row.spend);
+  const noConversionCampaigns = campaigns
+    .filter((row) => row.spend >= minSpend && row.conversions <= 0)
+    .sort((a, b) => b.spend - a.spend);
+  const noConversionSpend = sumBy(noConversionCampaigns, (row) => row.spend);
+  const scalableCampaigns = campaigns
+    .filter((row) => (
+      row.spend >= minSpend &&
+      row.conversions > 0 &&
+      row.roas >= Math.max(total.roas * 1.15, businessTotal.realRoas * 0.9, 2) &&
+      (!referenceAov || row.aov >= referenceAov * 0.85)
+    ))
+    .sort((a, b) => b.conversionValue - a.conversionValue);
+  const highPnoMarkets = markets
+    .filter((row) => row.realRevenue > 0 && row.spend >= minSpend && row.pno > Math.max(businessTotal.pno * 1.25, 8))
+    .sort((a, b) => b.pno - a.pno);
+  const metaCoverage = providerCoverage.find((row) => row.provider === 'meta_ads');
+  const googleCoverage = providerCoverage.find((row) => row.provider === 'google_ads');
+  const activeDetailLevels = detailCoverage.filter((row) => row.rows > 0).length;
+  const realAovMetric = periodComparison?.summary?.find((row) => row.label === 'Real AOV');
+  const platformAovMetric = periodComparison?.summary?.find((row) => row.label === 'Platform AOV');
+  const realAovChange = realAovMetric?.changePct ?? null;
+  const platformAovChange = platformAovMetric?.changePct ?? null;
+
+  const dataGaps = [
+    !metaCoverage?.hasData ? 'Meta Ads' : null,
+    businessViewState.status !== 'loaded' ? 'business views' : null,
+    activeDetailLevels < 4 ? 'hlubší Ads vrstvy' : null,
+    exactShare < 95 ? 'nákupky' : null,
+  ].filter(Boolean);
+
+  const cards = [
+    briefCard({
+      title: 'Ochrana zisku',
+      status: businessTotal.grossProfitAfterAds < 0
+        ? 'kritické'
+        : businessTotal.spendToGrossProfit > 45
+          ? 'hlídat'
+          : 'zdravé',
+      tone: businessTotal.grossProfitAfterAds < 0
+        ? 'critical'
+        : businessTotal.spendToGrossProfit > 45
+          ? 'warning'
+          : 'good',
+      value: formatCurrency(businessTotal.grossProfitAfterAds),
+      evidence: `PNO ${formatPercent(businessTotal.pno)}, Ads vs hrubý zisk ${formatPercent(businessTotal.spendToGrossProfit)}.`,
+      action: businessTotal.grossProfitAfterAds < 0
+        ? 'Nejdřív omezit spend, který nemá konverze nebo má nízkou hodnotu objednávky.'
+        : 'Škálovat jen tam, kde po Ads zůstává kladný hrubý zisk a drží se AOV.',
+    }),
+    briefCard({
+      title: 'Příčina nízkého AOV',
+      status: lowAovSpend > total.spend * 0.18 || (realAovChange !== null && realAovChange < -12)
+        ? 'pravděpodobný driver'
+        : 'bez silného signálu',
+      tone: lowAovSpend > total.spend * 0.18 || (realAovChange !== null && realAovChange < -12)
+        ? 'warning'
+        : 'info',
+      value: total.spend ? formatPercent((lowAovSpend / total.spend) * 100) : '0,0 %',
+      evidence: lowAovCampaigns[0]
+        ? `${lowAovCampaigns[0].campaignName}: AOV ${formatCurrency(lowAovCampaigns[0].aov)} vs reference ${formatCurrency(referenceAov)}, spend ${formatCurrency(lowAovCampaigns[0].spend)}.`
+        : `Real AOV trend ${realAovChange === null ? 'bez srovnání' : formatSignedPercent(realAovChange)}, platform AOV ${platformAovChange === null ? 'bez srovnání' : formatSignedPercent(platformAovChange)}.`,
+      action: 'Porovnat top produkty a search terms v kampaních s nízkým AOV proti kampaním s vyšším AOV.',
+    }),
+    briefCard({
+      title: 'Rozpočet k přesunu',
+      status: noConversionSpend > total.spend * 0.08 || highPnoMarkets.length ? 'najít únik' : 'bez velkého úniku',
+      tone: noConversionSpend > total.spend * 0.08 || highPnoMarkets.length ? 'warning' : 'good',
+      value: formatCurrency(noConversionSpend),
+      evidence: noConversionCampaigns[0]
+        ? `${noConversionCampaigns[0].campaignName}: spend ${formatCurrency(noConversionCampaigns[0].spend)} bez konverzí.`
+        : highPnoMarkets[0]
+          ? `${providerLabel(highPnoMarkets[0].provider)} / ${marketLabel(highPnoMarkets[0].market)}: PNO ${formatPercent(highPnoMarkets[0].pno)}.`
+          : 'Ve vybraném filtru není výrazný spend bez konverzí ani extrémní PNO segment.',
+      action: 'Rozpočet nepřidávat plošně; přesouvat ho z úniků do kampaní s lepším AOV/ROAS.',
+    }),
+    briefCard({
+      title: 'Prostor ke škálování',
+      status: scalableCampaigns.length ? 'existuje' : 'zatím slabý',
+      tone: scalableCampaigns.length ? 'good' : 'info',
+      value: scalableCampaigns.length ? formatCurrency(sumBy(scalableCampaigns, (row) => row.spend)) : formatCurrency(0),
+      evidence: scalableCampaigns[0]
+        ? `${scalableCampaigns[0].campaignName}: ROAS ${formatRatio(scalableCampaigns[0].roas)}, AOV ${formatCurrency(scalableCampaigns[0].aov)}, spend ${formatCurrency(scalableCampaigns[0].spend)}.`
+        : 'Nevidím kampaň s dostatečným spendem, konverzemi a nadprůměrným ROAS/AOV.',
+      action: scalableCampaigns.length
+        ? 'Navýšení dělat postupně a hlídat, jestli se po navýšení nezhorší AOV nebo zisk po Ads.'
+        : 'Nejdřív vyčistit slabé segmenty a doplnit deep detail, až potom řešit škálování.',
+    }),
+  ];
+
+  const tests = [
+    lowAovCampaigns[0] && briefTest({
+      title: 'Je pokles hodnoty objednávek kampanový mix?',
+      hypothesis: `${lowAovCampaigns[0].campaignName} a podobné kampaně nosí levnější objednávky než účet jako celek.`,
+      check: 'Rozpadnout podle shopping produktů, search terms, zařízení a země; porovnat AOV a ROAS proti kampaním s vyšší hodnotou.',
+      decision: 'Oddělit rozpočet/cíle pro nízké AOV, nebo omezit produkty a dotazy, které jen zvyšují objem levných objednávek.',
+    }),
+    highPnoMarkets[0] && briefTest({
+      title: 'Je problém v konkrétní zemi?',
+      hypothesis: `${marketLabel(highPnoMarkets[0].market)} má vyšší PNO než celek a může ředit profitabilitu.`,
+      check: 'Porovnat stejné kampaně mezi zeměmi: PNO, Real ROAS, AOV, zisk po Ads a produktový mix.',
+      decision: 'Udržet samostatný target podle země; nepřelévat rozpočet mezi trhy podle samotného objemu.',
+    }),
+    noConversionCampaigns[0] && briefTest({
+      title: 'Kde reklama utrácí bez výsledku?',
+      hypothesis: `${noConversionCampaigns[0].campaignName} má spend bez konverzí nebo mimo nákupní intent.`,
+      check: 'Projít query, produkty, asset groups, landing pages a atribuční zpoždění.',
+      decision: 'Pokud nejde o krátké učení/remarketing výjimku, omezit nebo izolovat rozpočet.',
+    }),
+    scalableCampaigns[0] && briefTest({
+      title: 'Kde lze bezpečně přidat?',
+      hypothesis: `${scalableCampaigns[0].campaignName} kombinuje výkon a rozumnou hodnotu objednávky.`,
+      check: 'Ověřit, že top produkty mají známou nákupku a po Ads zůstává hrubý zisk.',
+      decision: 'Testovat malé navýšení a kontrolovat trend AOV, PNO a zisku po Ads po 24-48 hodinách.',
+    }),
+  ].filter(Boolean);
+
+  if (!tests.length) {
+    tests.push(briefTest({
+      title: 'Nejdřív doplnit signální vrstvu',
+      hypothesis: 'Aktuální data nestačí na tvrdé PPC rozhodnutí bez rizika falešné interpretace.',
+      check: dataGaps.length
+        ? `Doplnit: ${dataGaps.join(', ')}.`
+        : 'Použít delší období nebo počkat na více konverzí ve filtru.',
+      decision: 'Do té doby řídit primárně podle PNO, Real ROAS a zisku po Ads, ne podle jednotlivých mikrosignálů.',
+    }));
+  }
+
+  const verdict = businessTotal.grossProfitAfterAds < 0
+    ? 'Firma je ve vybraném filtru po Ads v riziku. Priorita je ochrana zisku, ne růst.'
+    : lowAovSpend > total.spend * 0.18
+      ? 'Nejpravděpodobnější téma je mix levnějších objednávek. Potřebujeme ho oddělit od zdravého spendu.'
+      : scalableCampaigns.length
+        ? 'Základ je použitelný pro opatrné škálování, ale jen přes kampaně se zdravým AOV a ziskem po Ads.'
+        : 'Dashboard zatím ukazuje spíš kontrolní režim: držet PNO a hledat, kde vzniká výkonový rozdíl.';
+
+  return {
+    verdict,
+    cards,
+    tests: tests.slice(0, 4),
+    confidence: dataGaps.length ? `Omezená: chybí ${dataGaps.join(', ')}` : 'Dobrá: klíčové vrstvy jsou ve filtru dostupné',
+    referenceAov,
+    exactShare,
+    googleHasData: Boolean(googleCoverage?.hasData),
+    metaHasData: Boolean(metaCoverage?.hasData),
+    activeDetailLevels,
+  };
+}
+
 function buildPeriodComparison({
   currentRange,
   previousRange,
@@ -1675,6 +1851,67 @@ function OwnerPpcBrief({ insights, businessTotal, total, orderTotal }) {
             Zatím není dost dat pro prioritní doporučení.
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function DecisionBriefPanel({ brief }) {
+  const toneClass = {
+    critical: 'border-red-200 bg-red-50 text-red-900',
+    warning: 'border-amber-200 bg-amber-50 text-amber-900',
+    good: 'border-emerald-200 bg-emerald-50 text-emerald-900',
+    info: 'border-blue-200 bg-blue-50 text-blue-900',
+    neutral: 'border-slate-200 bg-slate-50 text-slate-800',
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
+      <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-800">PPC řídicí brief</h3>
+          <div className="mt-1 max-w-4xl text-sm leading-relaxed text-slate-600">{brief.verdict}</div>
+        </div>
+        <div className="shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          <div className="font-semibold text-slate-800">Jistota interpretace</div>
+          <div className="mt-1">{brief.confidence}</div>
+        </div>
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-4">
+        {brief.cards.map((card) => (
+          <div key={card.title} className={`rounded-lg border p-3 ${toneClass[card.tone] || toneClass.neutral}`}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs font-semibold uppercase tracking-wide opacity-70">{card.title}</div>
+              <StatusBadge value={card.status} />
+            </div>
+            <div className="mt-2 text-xl font-bold">{card.value}</div>
+            <div className="mt-2 text-xs leading-relaxed opacity-85">{card.evidence}</div>
+            <div className="mt-2 rounded-md bg-white/60 p-2 text-xs leading-relaxed">
+              <span className="font-semibold">Řízení: </span>{card.action}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4">
+        <div className="mb-2 text-sm font-semibold text-slate-800">Prioritní otázky pro PPC managera</div>
+        <div className="grid gap-3 lg:grid-cols-2">
+          {brief.tests.map((test) => (
+            <div key={test.title} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+              <div className="font-semibold text-slate-800">{test.title}</div>
+              <div className="mt-2 text-xs leading-relaxed text-slate-600">
+                <span className="font-semibold">Hypotéza: </span>{test.hypothesis}
+              </div>
+              <div className="mt-1 text-xs leading-relaxed text-slate-600">
+                <span className="font-semibold">Ověřit: </span>{test.check}
+              </div>
+              <div className="mt-1 text-xs leading-relaxed text-slate-600">
+                <span className="font-semibold">Rozhodnutí: </span>{test.decision}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -2548,6 +2785,27 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
     total,
     periodComparison,
   }), [campaigns, total, periodComparison]);
+  const decisionBrief = useMemo(() => buildDecisionBrief({
+    total,
+    businessTotal,
+    orderTotal,
+    campaigns,
+    markets,
+    providerCoverage,
+    detailCoverage,
+    periodComparison,
+    businessViewState,
+  }), [
+    total,
+    businessTotal,
+    orderTotal,
+    campaigns,
+    markets,
+    providerCoverage,
+    detailCoverage,
+    periodComparison,
+    businessViewState,
+  ]);
   const latestRun = syncRuns[0];
   const detailSections = [
     { key: 'ad_group', title: LEVEL_LABELS.ad_group, rows: topAdGroups },
@@ -2628,6 +2886,8 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
         total={total}
         orderTotal={orderTotal}
       />
+
+      <DecisionBriefPanel brief={decisionBrief} />
 
       <div>
         <div className="mb-3 flex items-center justify-between gap-3">
