@@ -1,0 +1,99 @@
+name: Ensure Ads Business Views
+
+on:
+  schedule:
+    - cron: '35 4 * * *'
+  workflow_dispatch:
+    inputs:
+      providers:
+        description: 'Verification providers'
+        required: false
+        default: 'google_ads,meta_ads'
+      markets:
+        description: 'Verification markets'
+        required: false
+        default: 'cz,sk,hu,ro'
+      from_date:
+        description: 'Verification range start YYYY-MM-DD'
+        required: false
+        default: '2026-05-01'
+      to_date:
+        description: 'Verification range end YYYY-MM-DD'
+        required: false
+        default: ''
+
+concurrency:
+  group: ensure-ads-business-views-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ensure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run verify:ads-readonly
+
+      - run: npm run verify:supabase-sql-safe
+
+      - name: Check database connection secret
+        id: db-secret
+        run: |
+          if [ -z "${SUPABASE_DB_URL}" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "SUPABASE_DB_URL is missing. Add the Supabase Postgres connection string as a GitHub secret; this workflow will then apply the read-only business views."
+            exit 0
+          fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+
+      - name: Install Postgres client
+        if: steps.db-secret.outputs.available == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Detect existing business views
+        id: views
+        if: steps.db-secret.outputs.available == 'true'
+        run: |
+          VIEW_COUNT="$(psql "$SUPABASE_DB_URL" -At -c "select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('v', 'm') and c.relname in ('order_business_daily_summary', 'marketing_business_provider_daily_summary', 'marketing_business_daily_total');")"
+          echo "view_count=${VIEW_COUNT}" >> "$GITHUB_OUTPUT"
+          if [ "${VIEW_COUNT}" = "3" ]; then
+            echo "needs_apply=false" >> "$GITHUB_OUTPUT"
+            echo "All business views already exist."
+          else
+            echo "needs_apply=true" >> "$GITHUB_OUTPUT"
+            echo "Only ${VIEW_COUNT}/3 business views exist. Applying read-only views."
+          fi
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+
+      - name: Apply business analytics views
+        if: steps.views.outputs.needs_apply == 'true'
+        run: psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/ad_business_analytics_views.sql
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+
+      - name: Verify business views against source data
+        if: steps.db-secret.outputs.available == 'true'
+        run: npm run check:ads-business-views
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          FX_RATES_JSON: ${{ vars.FX_RATES_JSON || '{"CZK":1,"EUR":25.2,"HUF":0.063,"RON":5.1}' }}
+          ADS_COVERAGE_PROVIDERS: ${{ github.event.inputs.providers || 'google_ads,meta_ads' }}
+          SYNC_MARKETS: ${{ github.event.inputs.markets || 'cz,sk,hu,ro' }}
+          SYNC_FROM_DATE: ${{ github.event.inputs.from_date || '2026-05-01' }}
+          SYNC_TO_DATE: ${{ github.event.inputs.to_date || '' }}
+          ADS_BUSINESS_VIEWS_REQUIRE: '1'
