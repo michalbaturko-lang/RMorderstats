@@ -9,6 +9,8 @@
  * marketing rows for the expected providers and markets.
  */
 
+import { appendFile } from 'node:fs/promises';
+
 import {
   requireEnv,
   supabaseRequest,
@@ -59,6 +61,11 @@ function parseBooleanEnv(name, fallback) {
   return !['0', 'false', 'no'].includes(String(value).toLowerCase());
 }
 
+function parseNumberEnv(name, fallback) {
+  const number = Number(process.env[name] || fallback);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
 function toNumber(value) {
   const number = Number(value || 0);
   return Number.isFinite(number) ? number : 0;
@@ -70,6 +77,10 @@ function formatNumber(value) {
 
 function formatCurrency(value) {
   return `${formatNumber(value)} Kč`;
+}
+
+function formatAgeMinutes(value) {
+  return Number.isFinite(value) ? value.toFixed(1) : 'n/a';
 }
 
 function todayUtc() {
@@ -263,6 +274,10 @@ function latestProviderDeepDetailRun(runs, provider) {
   return (runs || []).find((run) => run.provider === provider && isDeepDetailRun(run));
 }
 
+function runTimestamp(run) {
+  return run?.finished_at || run?.started_at || '';
+}
+
 function printSecretStatus(label, status, blockers) {
   if (status.ok) {
     console.log(`[marketing-status] ${label}: OK`);
@@ -317,6 +332,57 @@ function printLatestRuns(runs, providers) {
   }
 }
 
+function printCampaignSyncFreshness(runs, providers, blockers, { maxAgeMinutes, enforceProviders }) {
+  const now = new Date();
+  const enforced = new Set(enforceProviders);
+  const rows = [];
+
+  console.log(`[marketing-status] Campaign sync freshness threshold: ${formatNumber(maxAgeMinutes)} minutes`);
+
+  for (const provider of providers) {
+    const run = latestProviderRun(runs, provider, 'campaign');
+    const age = run ? ageMinutes(runTimestamp(run), now) : Number.POSITIVE_INFINITY;
+    const shouldEnforce = enforced.has(provider);
+    const statusOk = run?.status === 'success';
+    const fresh = Boolean(run && statusOk && age <= maxAgeMinutes);
+    const row = {
+      provider,
+      status: run?.status || 'missing',
+      syncType: run?.sync_type || 'missing',
+      range: run ? `${run.range_from}..${run.range_to}` : 'n/a',
+      rowsUpserted: toNumber(run?.rows_upserted),
+      ageMinutes: Number.isFinite(age) ? age : null,
+      thresholdMinutes: maxAgeMinutes,
+      fresh,
+      enforced: shouldEnforce,
+    };
+    rows.push(row);
+
+    console.log([
+      `[marketing-status] campaign freshness ${provider}`,
+      `status=${row.status}`,
+      `sync_type=${row.syncType}`,
+      `range=${row.range}`,
+      `rows=${formatNumber(row.rowsUpserted)}`,
+      `age_minutes=${formatAgeMinutes(age)}`,
+      `threshold_minutes=${formatNumber(maxAgeMinutes)}`,
+      `fresh=${fresh ? 'yes' : 'no'}`,
+      `enforced=${shouldEnforce ? 'yes' : 'no'}`,
+    ].join(' | '));
+
+    if (!shouldEnforce) continue;
+    if (!run) {
+      blockers.push(`${provider}: no campaign spend sync run`);
+    } else if (!statusOk) {
+      blockers.push(`${provider}: latest campaign spend sync status is ${run.status}`);
+    } else if (age > maxAgeMinutes) {
+      blockers.push(`${provider}: campaign spend sync stale (${formatAgeMinutes(age)} min > ${formatNumber(maxAgeMinutes)} min)`);
+    }
+  }
+
+  return rows;
+}
+
 function printCampaignCoverage(summary, providers, markets, blockers, { label, requireRows }) {
   console.log(`[marketing-status] Campaign coverage: ${label}`);
   for (const provider of providers) {
@@ -351,6 +417,121 @@ function printDetailCoverage(summary, providers, markets, levels) {
   }
 }
 
+function escapeMarkdownCell(value) {
+  return String(value ?? '').replace(/\|/g, '\\|').replace(/\n/g, '<br>');
+}
+
+function markdownTable(headers, rows) {
+  return [
+    `| ${headers.map(escapeMarkdownCell).join(' | ')} |`,
+    `| ${headers.map(() => '---').join(' | ')} |`,
+    ...rows.map((row) => `| ${row.map(escapeMarkdownCell).join(' | ')} |`),
+  ].join('\n');
+}
+
+function findCampaignSummary(summary, provider, market) {
+  return summary.find((item) => item.provider === provider && item.market === market);
+}
+
+function relationMarkdownRows(statuses) {
+  return statuses.map((row) => [
+    row.relation,
+    row.status === 'ok' ? 'OK' : row.status,
+  ]);
+}
+
+function campaignCoverageMarkdownRows(summary, providers, markets) {
+  const rows = [];
+  for (const provider of providers) {
+    for (const market of markets) {
+      const row = findCampaignSummary(summary, provider, market);
+      rows.push([
+        `${provider}/${market.toUpperCase()}`,
+        formatNumber(row?.rows || 0),
+        formatNumber(row?.days || 0),
+        `${row?.firstDate || 'n/a'}..${row?.lastDate || 'n/a'}`,
+        formatCurrency(row?.spend || 0),
+        formatNumber(row?.clicks || 0),
+        formatNumber(row?.conversions || 0),
+      ]);
+    }
+  }
+  return rows;
+}
+
+async function writeGithubSummary({
+  from,
+  to,
+  healthDate,
+  providers,
+  markets,
+  maxCampaignAgeMinutes,
+  freshnessRows,
+  coreStatuses,
+  businessStatuses,
+  currentCampaignSummary,
+  historicalCampaignSummary,
+  blockers,
+}) {
+  if (!process.env.GITHUB_STEP_SUMMARY) return;
+
+  const lines = [
+    '## Marketing Analytics Status',
+    '',
+    `Range: \`${from}\` -> \`${to}\`  `,
+    `Health date: \`${healthDate}\`  `,
+    `Providers: \`${providers.join(', ')}\`  `,
+    `Markets: \`${markets.join(', ')}\``,
+    '',
+    '### Campaign Spend Sync Freshness',
+    '',
+    markdownTable(
+      ['Provider', 'Status', 'Fresh', 'Age min', 'Threshold min', 'Range', 'Rows', 'Enforced'],
+      freshnessRows.map((row) => [
+        row.provider,
+        row.status,
+        row.fresh ? 'yes' : 'no',
+        row.ageMinutes == null ? 'n/a' : row.ageMinutes.toFixed(1),
+        maxCampaignAgeMinutes,
+        row.range,
+        formatNumber(row.rowsUpserted),
+        row.enforced ? 'yes' : 'no',
+      ]),
+    ),
+    '',
+    '### Current Campaign Spend',
+    '',
+    markdownTable(
+      ['Provider / Market', 'Rows', 'Days', 'Data range', 'Spend', 'Clicks', 'Conversions'],
+      campaignCoverageMarkdownRows(currentCampaignSummary, providers, markets),
+    ),
+    '',
+    '### Historical Campaign Spend',
+    '',
+    markdownTable(
+      ['Provider / Market', 'Rows', 'Days', 'Data range', 'Spend', 'Clicks', 'Conversions'],
+      campaignCoverageMarkdownRows(historicalCampaignSummary, providers, markets),
+    ),
+    '',
+    '### Supabase Relations',
+    '',
+    markdownTable(['Relation', 'Status'], relationMarkdownRows(coreStatuses)),
+    '',
+    '### Business Views',
+    '',
+    markdownTable(['View', 'Status'], relationMarkdownRows(businessStatuses)),
+    '',
+    '### Blockers',
+    '',
+    blockers.length
+      ? blockers.map((blocker) => `- ${blocker}`).join('\n')
+      : '- none',
+    '',
+  ];
+
+  await appendFile(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+}
+
 function printHelp() {
   console.log(`
 Usage:
@@ -365,6 +546,7 @@ Env:
   MARKETING_STATUS_TO_DATE=YYYY-MM-DD
   MARKETING_STATUS_HEALTH_DATE=YYYY-MM-DD
   MARKETING_STATUS_REQUIRE_COMPLETE=0
+  MARKETING_STATUS_MAX_CAMPAIGN_AGE_MINUTES=45
 `);
 }
 
@@ -384,6 +566,7 @@ async function main() {
   const to = process.env.MARKETING_STATUS_TO_DATE || todayUtc();
   const healthDate = process.env.MARKETING_STATUS_HEALTH_DATE || defaultHealthDate();
   const requireComplete = parseBooleanEnv('MARKETING_STATUS_REQUIRE_COMPLETE', false);
+  const maxCampaignAgeMinutes = parseNumberEnv('MARKETING_STATUS_MAX_CAMPAIGN_AGE_MINUTES', 45);
   const blockers = [];
 
   console.log(`[marketing-status] Range: ${from} -> ${to}`);
@@ -391,10 +574,14 @@ async function main() {
   console.log(`[marketing-status] Providers: ${providers.join(', ')}`);
   console.log(`[marketing-status] Markets: ${markets.join(', ')}`);
 
-  printSecretStatus('Supabase service credentials', secretNamesStatus(['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']), blockers);
-  printSecretStatus('Supabase DB apply secret', secretNamesStatus(['SUPABASE_DB_URL']), blockers);
-  printSecretStatus('Google Ads read-only credentials', googleAuthStatus(), blockers);
-  printSecretStatus('Meta Ads read-only credentials', metaAuthStatus(), blockers);
+  const supabaseSecrets = secretNamesStatus(['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']);
+  const dbApplySecrets = secretNamesStatus(['SUPABASE_DB_URL']);
+  const googleSecrets = googleAuthStatus();
+  const metaSecrets = metaAuthStatus();
+  printSecretStatus('Supabase service credentials', supabaseSecrets, blockers);
+  printSecretStatus('Supabase DB apply secret', dbApplySecrets, blockers);
+  printSecretStatus('Google Ads read-only credentials', googleSecrets, blockers);
+  printSecretStatus('Meta Ads read-only credentials', metaSecrets, blockers);
 
   const coreStatuses = await Promise.all(CORE_RELATIONS.map((relation) => relationStatus({ supabaseUrl, serviceRoleKey, relation })));
   const businessStatuses = await Promise.all(BUSINESS_VIEWS.map((relation) => relationStatus({ supabaseUrl, serviceRoleKey, relation })));
@@ -411,6 +598,10 @@ async function main() {
     limit: 100,
   });
   printLatestRuns(runs || [], providers);
+  const freshnessRows = printCampaignSyncFreshness(runs || [], providers, blockers, {
+    maxAgeMinutes: maxCampaignAgeMinutes,
+    enforceProviders: providers.filter((provider) => provider === 'google_ads' || (provider === 'meta_ads' && metaSecrets.ok)),
+  });
 
   const currentCampaignRows = await fetchAllRowsWithRange({
     supabaseUrl,
@@ -425,7 +616,8 @@ async function main() {
     },
     orderBy: 'provider.asc,market.asc,date.asc',
   });
-  printCampaignCoverage(summarizeCampaignRows(currentCampaignRows), providers, markets, blockers, {
+  const currentCampaignSummary = summarizeCampaignRows(currentCampaignRows);
+  printCampaignCoverage(currentCampaignSummary, providers, markets, blockers, {
     label: healthDate,
     requireRows: true,
   });
@@ -443,7 +635,8 @@ async function main() {
     },
     orderBy: 'provider.asc,market.asc,date.asc',
   });
-  printCampaignCoverage(summarizeCampaignRows(historicalCampaignRows), providers, markets, blockers, {
+  const historicalCampaignSummary = summarizeCampaignRows(historicalCampaignRows);
+  printCampaignCoverage(historicalCampaignSummary, providers, markets, blockers, {
     label: `${from}..${to}`,
     requireRows: false,
   });
@@ -468,6 +661,21 @@ async function main() {
   if (metaExpected && !uniqueHistoricalProviders.has('meta_ads')) {
     blockers.push('meta_ads: no historical campaign rows yet');
   }
+
+  await writeGithubSummary({
+    from,
+    to,
+    healthDate,
+    providers,
+    markets,
+    maxCampaignAgeMinutes,
+    freshnessRows,
+    coreStatuses,
+    businessStatuses,
+    currentCampaignSummary,
+    historicalCampaignSummary,
+    blockers,
+  });
 
   if (blockers.length) {
     console.log('[marketing-status] NOT READY:');

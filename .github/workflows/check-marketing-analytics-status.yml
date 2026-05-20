@@ -25,6 +25,10 @@ on:
         description: 'Current coverage date YYYY-MM-DD. Defaults to yesterday UTC.'
         required: false
         default: ''
+      max_campaign_age_minutes:
+        description: 'Warn when latest campaign spend sync is older than this many minutes.'
+        required: false
+        default: '45'
       require_complete:
         description: 'Fail while expected blockers remain. Keep 0 until Meta and business views are connected.'
         required: false
@@ -72,4 +76,5 @@ jobs:
           MARKETING_STATUS_TO_DATE: ${{ github.event.inputs.to_date || '' }}
           MARKETING_STATUS_HEALTH_DATE: ${{ github.event.inputs.health_date || '' }}
           MARKETING_STATUS_DETAIL_LEVELS: ${{ vars.MARKETING_STATUS_DETAIL_LEVELS || 'device,hour,ad_group,ad,keyword,search_term,shopping_product,asset_group,geo,conversion_action,audience,placement' }}
+          MARKETING_STATUS_MAX_CAMPAIGN_AGE_MINUTES: ${{ github.event.inputs.max_campaign_age_minutes || vars.MARKETING_STATUS_MAX_CAMPAIGN_AGE_MINUTES || '45' }}
           MARKETING_STATUS_REQUIRE_COMPLETE: ${{ github.event.inputs.require_complete || '0' }}
