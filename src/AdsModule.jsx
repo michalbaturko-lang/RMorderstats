@@ -1204,6 +1204,63 @@ function BusinessSourceCard({ state }) {
   );
 }
 
+function ReadinessBlockers({ providerCoverage, businessViewState, exactShare }) {
+  const blockers = [];
+  const meta = providerCoverage.find((row) => row.provider === 'meta_ads');
+  const google = providerCoverage.find((row) => row.provider === 'google_ads');
+
+  if (!meta?.hasData) {
+    blockers.push({
+      title: 'Meta Ads nejsou v datech',
+      detail: 'Ve vybraném filtru zatím nejsou Meta campaign řádky. Pokud už jsou přístupy doplněné, spustit readiness check, sync a historický backfill.',
+    });
+  }
+  if (businessViewState.status !== 'loaded') {
+    blockers.push({
+      title: 'Business views nejsou aplikované v Supabase',
+      detail: 'Dashboard počítá tržby, PNO a zisk po Ads fallbackem v prohlížeči; po doplnění SUPABASE_DB_URL se přepne na Supabase views.',
+    });
+  }
+  if (google?.hasData && !google?.hasDeepDetail) {
+    blockers.push({
+      title: 'Google deep detail není kompletní',
+      detail: 'Spend běží, ale chybí hlubší vrstvy pro kampaně, search terms, produkty, zařízení nebo geo.',
+    });
+  }
+  if (exactShare < 95) {
+    blockers.push({
+      title: 'Část objednávek nemá přesnou nákupku',
+      detail: 'Zisk po Ads je nejpřesnější až ve chvíli, kdy mají všechny produkty nákupní cenu.',
+    });
+  }
+
+  if (!blockers.length) {
+    return (
+      <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+        <div className="font-semibold">Marketing analytics je pro vybraný filtr datově připravený.</div>
+        <div className="mt-1 text-xs opacity-80">Google/Meta, business metriky i maržová přesnost mají data v očekávaném stavu.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="text-sm font-semibold">Co chybí do plného stavu</div>
+        <StatusBadge value={`${formatNumber(blockers.length)} blokery`} />
+      </div>
+      <div className="grid gap-2 md:grid-cols-2">
+        {blockers.map((item) => (
+          <div key={item.title} className="rounded-md bg-white/65 p-2 text-xs leading-relaxed">
+            <div className="font-semibold">{item.title}</div>
+            <div className="mt-1 opacity-80">{item.detail}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function DataReadinessPanel({ providerCoverage, detailCoverage, orderTotal, businessViewState }) {
   const exactShare = orderTotal.orders ? (orderTotal.exactOrders / orderTotal.orders) * 100 : 0;
   const activeDetails = detailCoverage.filter((row) => row.rows > 0);
@@ -1231,6 +1288,11 @@ function DataReadinessPanel({ providerCoverage, detailCoverage, orderTotal, busi
           </div>
         </div>
       </div>
+      <ReadinessBlockers
+        providerCoverage={providerCoverage}
+        businessViewState={businessViewState}
+        exactShare={exactShare}
+      />
       <div className="mt-3 flex flex-wrap gap-2">
         {detailCoverage.map((row) => (
           <span
