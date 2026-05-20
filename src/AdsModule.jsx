@@ -58,6 +58,15 @@ const DETAIL_COVERAGE_LEVELS = [
 ];
 const DETAIL_LEVEL_ROW_LIMIT = 700;
 const MAX_CAMPAIGN_SYNC_AGE_MINUTES = 45;
+const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
+const MARKET_ORDER = ['cz', 'sk', 'hu', 'ro', 'unknown'];
+const MARKET_COLORS = {
+  cz: '#2563eb',
+  sk: '#0f766e',
+  hu: '#dc2626',
+  ro: '#7c3aed',
+  unknown: '#64748b',
+};
 
 const toNumber = (value) => {
   const number = Number(value || 0);
@@ -180,6 +189,11 @@ const enrichMetrics = (metrics) => ({
 const getOrderCurrency = (order) => order.currency || order.raw_data?.currency_id || 'CZK';
 const getOrderMarket = (order) => (order.market || order.raw_data?.language_id || 'unknown').toLowerCase();
 const getOrderDateKey = (order) => String(order.order_date || order.created_at || '').slice(0, 10);
+const getOrderHour = (order) => {
+  const date = new Date(order.order_date || order.created_at || '');
+  if (Number.isNaN(date.getTime())) return null;
+  return date.getHours();
+};
 
 function addOrderMetrics(target, order) {
   const products = Array.isArray(order.raw_data?.products) ? order.raw_data.products : [];
@@ -273,6 +287,35 @@ async function fetchOrdersForRange(supabaseClient, range, country = 'all') {
   }
 
   return cleanOrders(rows, country);
+}
+
+async function fetchHourlyAdRowsForRange(supabaseClient, { dateFrom, dateTo, country = 'all' }) {
+  const rows = [];
+  const pageSize = 1000;
+
+  for (let from = 0; ; from += pageSize) {
+    let query = supabaseClient
+      .from('ad_metrics_daily')
+      .select('date,provider,market,level,campaign_id,campaign_name,currency,spend_czk,clicks,interactions,impressions,conversions,conversion_value_czk,dimensions,fetched_at')
+      .gte('date', dateFrom)
+      .lte('date', dateTo)
+      .eq('provider', 'google_ads')
+      .eq('level', 'hour')
+      .order('date', { ascending: true })
+      .order('market', { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (country && country !== 'all') query = query.eq('market', country);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const chunk = Array.isArray(data) ? data : [];
+    rows.push(...chunk);
+    if (chunk.length < pageSize) break;
+  }
+
+  return rows;
 }
 
 function aggregateOrders(orders) {
@@ -664,6 +707,176 @@ function aggregateDetails(rows, level) {
     .map(enrichMetrics)
     .sort((a, b) => b.spend - a.spend)
     .slice(0, 12);
+}
+
+function createIntradayRow(hour) {
+  const row = {
+    hour,
+    label: `${String(hour).padStart(2, '0')}:00`,
+    fullLabel: `${String(hour).padStart(2, '0')}:00 - ${String(hour).padStart(2, '0')}:59`,
+    spend: 0,
+    clicks: 0,
+    impressions: 0,
+    conversions: 0,
+    conversionValue: 0,
+    orders: 0,
+    realRevenue: 0,
+  };
+
+  for (const market of MARKET_ORDER) {
+    row[`spend_${market}`] = 0;
+    row[`orders_${market}`] = 0;
+  }
+
+  return row;
+}
+
+function aggregateIntradaySpend(hourlyRows, orders, country) {
+  const byHour = new Map(HOURS.map((hour) => [hour, createIntradayRow(hour)]));
+  const byMarket = new Map();
+  let latestFetchedAt = '';
+
+  const getMarketRow = (market) => {
+    if (!byMarket.has(market)) {
+      byMarket.set(market, {
+        market,
+        spend: 0,
+        clicks: 0,
+        conversions: 0,
+        orders: 0,
+        realRevenue: 0,
+      });
+    }
+    return byMarket.get(market);
+  };
+
+  for (const row of hourlyRows) {
+    const hour = Number(row.dimensions?.hour);
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23) continue;
+    const market = row.market || 'unknown';
+    const target = byHour.get(hour);
+    const marketTarget = getMarketRow(market);
+    const spend = toNumber(row.spend_czk);
+    const clicks = toNumber(row.clicks);
+    const impressions = toNumber(row.impressions);
+    const conversions = toNumber(row.conversions);
+    const conversionValue = toNumber(row.conversion_value_czk);
+
+    target.spend += spend;
+    target.clicks += clicks;
+    target.impressions += impressions;
+    target.conversions += conversions;
+    target.conversionValue += conversionValue;
+    target[`spend_${market}`] = toNumber(target[`spend_${market}`]) + spend;
+
+    marketTarget.spend += spend;
+    marketTarget.clicks += clicks;
+    marketTarget.conversions += conversions;
+
+    if (row.fetched_at && (!latestFetchedAt || row.fetched_at > latestFetchedAt)) {
+      latestFetchedAt = row.fetched_at;
+    }
+  }
+
+  for (const order of orders) {
+    const hour = getOrderHour(order);
+    if (hour === null || !byHour.has(hour)) continue;
+    const market = getOrderMarket(order);
+    if (country && country !== 'all' && market !== country) continue;
+
+    const orderMetrics = emptyOrderMetrics();
+    addOrderMetrics(orderMetrics, order);
+
+    const target = byHour.get(hour);
+    const marketTarget = getMarketRow(market);
+    target.orders += 1;
+    target.realRevenue += orderMetrics.revenue;
+    target[`orders_${market}`] = toNumber(target[`orders_${market}`]) + 1;
+
+    marketTarget.orders += 1;
+    marketTarget.realRevenue += orderMetrics.revenue;
+  }
+
+  const data = Array.from(byHour.values());
+  const totals = data.reduce((acc, row) => {
+    acc.spend += row.spend;
+    acc.clicks += row.clicks;
+    acc.impressions += row.impressions;
+    acc.conversions += row.conversions;
+    acc.conversionValue += row.conversionValue;
+    acc.orders += row.orders;
+    acc.realRevenue += row.realRevenue;
+    return acc;
+  }, { spend: 0, clicks: 0, impressions: 0, conversions: 0, conversionValue: 0, orders: 0, realRevenue: 0 });
+
+  for (const row of data) {
+    row.spendSharePct = totals.spend ? (row.spend / totals.spend) * 100 : 0;
+    row.orderSharePct = totals.orders ? (row.orders / totals.orders) * 100 : 0;
+    row.spendOrderGapPct = row.spendSharePct - row.orderSharePct;
+    row.costPerOrder = row.orders ? row.spend / row.orders : null;
+    row.pno = row.realRevenue ? (row.spend / row.realRevenue) * 100 : 0;
+  }
+
+  const markets = Array.from(byMarket.values())
+    .map((row) => ({
+      ...row,
+      costPerOrder: row.orders ? row.spend / row.orders : null,
+      pno: row.realRevenue ? (row.spend / row.realRevenue) * 100 : 0,
+    }))
+    .sort((a, b) => {
+      const ai = MARKET_ORDER.indexOf(a.market);
+      const bi = MARKET_ORDER.indexOf(b.market);
+      if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+      return a.market.localeCompare(b.market);
+    });
+
+  return {
+    data,
+    markets,
+    totals,
+    latestFetchedAt,
+    hasHourlySpend: hourlyRows.length > 0,
+  };
+}
+
+function buildIntradayDiagnostics(intraday) {
+  if (!intraday.hasHourlySpend) {
+    return {
+      status: 'missing',
+      title: 'Hodinový spend zatím není ve filtru',
+      message: 'Google Ads hour data pro zvolené období nejsou načtená. Po novém 15min syncu se tady objeví spend po hodinách.',
+    };
+  }
+
+  const activeRows = intraday.data.filter((row) => row.spend > 0 || row.orders > 0);
+  const minMeaningfulSpend = Math.max(300, intraday.totals.spend * 0.03);
+  const spendWithoutOrders = activeRows
+    .filter((row) => row.spend >= minMeaningfulSpend && row.orders === 0)
+    .sort((a, b) => b.spend - a.spend)[0];
+  if (spendWithoutOrders) {
+    return {
+      status: 'warning',
+      title: 'Spend běžel, objednávky v hodině nepřišly',
+      message: `${spendWithoutOrders.fullLabel}: spend ${formatCurrency(spendWithoutOrders.spend)}, objednávky 0. Tohle je první místo pro kontrolu měření, dostupnosti webu a relevance trafficu.`,
+    };
+  }
+
+  const largestGap = activeRows
+    .filter((row) => row.spend >= minMeaningfulSpend && row.spendOrderGapPct > 5)
+    .sort((a, b) => b.spendOrderGapPct - a.spendOrderGapPct)[0];
+  if (largestGap) {
+    return {
+      status: 'info',
+      title: 'Spend je koncentrovanější než objednávky',
+      message: `${largestGap.fullLabel}: ${formatPercent(largestGap.spendSharePct)} spendu vs ${formatPercent(largestGap.orderSharePct)} objednávek. Zkontroloval bych kampaně a search terms v této části dne.`,
+    };
+  }
+
+  return {
+    status: 'ok',
+    title: 'Spend a objednávky nemají zjevný hodinový rozpad',
+    message: 'Ve zvoleném období nevidím hodinu, kde by významný spend běžel úplně bez objednávek nebo byl výrazně mimo objednávkový podíl.',
+  };
 }
 
 function finiteCount(value) {
@@ -2810,6 +3023,152 @@ function AdsTooltip({ active, payload }) {
   );
 }
 
+function IntradayTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+  const item = payload[0]?.payload;
+  if (!item) return null;
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-lg">
+      <div className="mb-1 font-semibold text-slate-800">{item.fullLabel}</div>
+      <div className="text-red-700">Spend: {formatCurrency(item.spend)}</div>
+      <div className="text-blue-700">Objednávky: {formatNumber(item.orders)}</div>
+      <div className="text-slate-700">Kč / obj.: {item.costPerOrder === null ? '—' : formatCurrency(item.costPerOrder)}</div>
+      <div className="text-slate-500">PNO v hodině: {formatPercent(item.pno)}</div>
+      <div className="mt-1 text-slate-400">
+        Podíl spendu {formatPercent(item.spendSharePct)} · podíl obj. {formatPercent(item.orderSharePct)}
+      </div>
+    </div>
+  );
+}
+
+function IntradaySpendPanel({ intraday, diagnostics, country }) {
+  const visibleMarkets = MARKET_ORDER.filter((market) => (
+    intraday.data.some((row) => toNumber(row[`spend_${market}`]) > 0 || toNumber(row[`orders_${market}`]) > 0)
+  ));
+  const shownMarkets = country && country !== 'all'
+    ? visibleMarkets.filter((market) => market === country)
+    : visibleMarkets;
+  const diagnosticClass = {
+    missing: 'border-amber-200 bg-amber-50 text-amber-900',
+    warning: 'border-red-200 bg-red-50 text-red-900',
+    info: 'border-blue-200 bg-blue-50 text-blue-900',
+    ok: 'border-emerald-200 bg-emerald-50 text-emerald-900',
+  }[diagnostics.status] || 'border-slate-200 bg-slate-50 text-slate-800';
+
+  return (
+    <div className="rounded-lg border border-slate-200 p-3">
+      <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-800">Spend během dne</h3>
+          <div className="text-xs text-slate-500">
+            Google Ads po hodinách vs objednávky · {country === 'all' ? 'rozpad podle zemí' : marketLabel(country)}
+          </div>
+          <div className="mt-1 text-[11px] text-slate-400">
+            Hodiny u Ads jsou dle časové zóny reklamního účtu; objednávky dle uloženého času objednávky.
+          </div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          <div className="font-semibold text-slate-800">Hodinová data</div>
+          <div>{intraday.hasHourlySpend ? `poslední fetch ${formatDateTime(intraday.latestFetchedAt)}` : 'zatím bez hour rows'}</div>
+        </div>
+      </div>
+
+      <div className={`mb-3 rounded-lg border p-3 text-sm ${diagnosticClass}`}>
+        <div className="font-semibold">{diagnostics.title}</div>
+        <div className="mt-1 text-xs leading-relaxed">{diagnostics.message}</div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Kpi label="Hodinový spend" value={formatCurrency(intraday.totals.spend)} sub={`${formatNumber(intraday.totals.clicks)} kliků`} tone="amber" />
+        <Kpi label="Objednávky" value={formatNumber(intraday.totals.orders)} sub="ve stejném období" tone="blue" />
+        <Kpi label="Kč / objednávka" value={intraday.totals.orders ? formatCurrency(intraday.totals.spend / intraday.totals.orders) : '—'} sub="spend / objednávky" />
+        <Kpi label="PNO po hodinách" value={formatPercent(intraday.totals.realRevenue ? (intraday.totals.spend / intraday.totals.realRevenue) * 100 : 0)} sub="spend / produktové tržby" />
+      </div>
+
+      <div className="mt-4 h-72 rounded-lg border border-slate-200 bg-slate-50 p-2">
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={intraday.data} margin={{ top: 12, right: 18, left: 8, bottom: 6 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+            <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#64748b' }} minTickGap={8} />
+            <YAxis yAxisId="money" tickFormatter={(value) => `${Math.round(value / 1000)}k`} tick={{ fontSize: 11, fill: '#64748b' }} />
+            <YAxis yAxisId="orders" orientation="right" allowDecimals={false} tick={{ fontSize: 11, fill: '#64748b' }} />
+            <RechartsTooltip content={<IntradayTooltip />} />
+            <Legend wrapperStyle={{ fontSize: '12px' }} />
+            {shownMarkets.map((market) => (
+              <Bar
+                key={market}
+                yAxisId="money"
+                dataKey={`spend_${market}`}
+                name={`Spend ${marketLabel(market)}`}
+                stackId="spend"
+                fill={MARKET_COLORS[market] || MARKET_COLORS.unknown}
+                radius={[4, 4, 0, 0]}
+              />
+            ))}
+            <Line yAxisId="orders" type="monotone" dataKey="orders" name="Objednávky" stroke="#0f172a" strokeWidth={2.4} dot={false} activeDot={{ r: 4 }} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200">
+        <table className="w-full min-w-[980px] text-xs">
+          <thead className="bg-slate-50 uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-3 py-2 text-left">Hodina</th>
+              <th className="px-3 py-2 text-right">Spend</th>
+              <th className="px-3 py-2 text-right">Obj.</th>
+              <th className="px-3 py-2 text-right">Kč / obj.</th>
+              <th className="px-3 py-2 text-right">PNO</th>
+              <th className="px-3 py-2 text-right">Podíl spendu</th>
+              <th className="px-3 py-2 text-right">Podíl obj.</th>
+              <th className="px-3 py-2 text-left">Země</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {intraday.data.map((row) => (
+              <tr key={row.hour} className="hover:bg-slate-50">
+                <td className="px-3 py-2 font-semibold text-slate-800">{row.fullLabel}</td>
+                <td className="px-3 py-2 text-right font-semibold text-red-700">{formatCurrency(row.spend)}</td>
+                <td className="px-3 py-2 text-right text-slate-700">{formatNumber(row.orders)}</td>
+                <td className="px-3 py-2 text-right text-slate-700">{row.costPerOrder === null ? '—' : formatCurrency(row.costPerOrder)}</td>
+                <td className="px-3 py-2 text-right text-slate-700">{formatPercent(row.pno)}</td>
+                <td className="px-3 py-2 text-right text-slate-700">{formatPercent(row.spendSharePct)}</td>
+                <td className="px-3 py-2 text-right text-slate-700">{formatPercent(row.orderSharePct)}</td>
+                <td className="px-3 py-2 text-slate-600">
+                  {shownMarkets.map((market) => (
+                    <span key={market} className="mr-3 whitespace-nowrap">
+                      <span className="font-semibold" style={{ color: MARKET_COLORS[market] || MARKET_COLORS.unknown }}>
+                        {marketLabel(market)}
+                      </span>{' '}
+                      {formatCurrency(row[`spend_${market}`])} / {formatNumber(row[`orders_${market}`])} obj.
+                    </span>
+                  ))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {!!intraday.markets.length && (
+        <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+          {intraday.markets
+            .filter((row) => !country || country === 'all' || row.market === country)
+            .map((row) => (
+              <div key={row.market} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
+                <div className="font-semibold text-slate-800">{marketLabel(row.market)}</div>
+                <div className="mt-1 text-red-700">Spend {formatCurrency(row.spend)}</div>
+                <div className="text-blue-700">Objednávky {formatNumber(row.orders)}</div>
+                <div className="text-slate-500">Kč / obj. {row.costPerOrder === null ? '—' : formatCurrency(row.costPerOrder)} · PNO {formatPercent(row.pno)}</div>
+              </div>
+            ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, orders = [] }) {
   const [dailyRows, setDailyRows] = useState([]);
   const [campaignRows, setCampaignRows] = useState([]);
@@ -2818,6 +3177,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
   const [previousOrderState, setPreviousOrderState] = useState({ status: 'idle', message: '' });
   const [campaignMetaRows, setCampaignMetaRows] = useState([]);
   const [detailRows, setDetailRows] = useState([]);
+  const [hourlyRows, setHourlyRows] = useState([]);
   const [detailCounts, setDetailCounts] = useState({ byLevel: {}, byProvider: {} });
   const [syncRuns, setSyncRuns] = useState([]);
   const [businessDailyRows, setBusinessDailyRows] = useState([]);
@@ -2873,6 +3233,9 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
             .then((data) => ({ data, error: null }))
             .catch((orderError) => ({ data: [], error: orderError }))
         : Promise.resolve({ data: [], error: null });
+      const hourlyRowsPromise = fetchHourlyAdRowsForRange(supabaseClient, { dateFrom, dateTo, country })
+        .then((data) => ({ data, error: null }))
+        .catch((hourlyError) => ({ data: [], error: hourlyError }));
 
       const detailQueries = DETAIL_COVERAGE_LEVELS.map((level) => applyMarket(
         supabaseClient
@@ -2934,10 +3297,11 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
           .range(0, 9999)
       );
 
-      const [campaignMetricResult, previousCampaignMetricResult, previousOrdersResult, metaResult, runsResult, businessDailyResult, businessProviderResult, ...detailAndCountResults] = await Promise.all([
+      const [campaignMetricResult, previousCampaignMetricResult, previousOrdersResult, hourlyRowsResult, metaResult, runsResult, businessDailyResult, businessProviderResult, ...detailAndCountResults] = await Promise.all([
         campaignMetricQuery,
         previousCampaignMetricQuery,
         previousOrdersPromise,
+        hourlyRowsPromise,
         metaQuery,
         runsQuery,
         businessDailyQuery,
@@ -2950,7 +3314,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
       const detailResults = detailAndCountResults.slice(0, DETAIL_COVERAGE_LEVELS.length);
       const detailCountResults = detailAndCountResults.slice(DETAIL_COVERAGE_LEVELS.length, DETAIL_COVERAGE_LEVELS.length * 2);
       const providerDetailCountResults = detailAndCountResults.slice(DETAIL_COVERAGE_LEVELS.length * 2);
-      const firstError = [campaignMetricResult, previousCampaignMetricResult, metaResult, runsResult, ...detailResults].find((result) => result.error)?.error;
+      const firstError = [campaignMetricResult, previousCampaignMetricResult, hourlyRowsResult, metaResult, runsResult, ...detailResults].find((result) => result.error)?.error;
       if (firstError) throw firstError;
 
       if (!cancelled) {
@@ -2972,6 +3336,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
               message: previousRange ? '' : 'Bez předchozího období.',
             });
         setDetailRows(detailResults.flatMap((result) => result.data || []));
+        setHourlyRows(hourlyRowsResult.data || []);
         setDetailCounts({
           byLevel: Object.fromEntries(DETAIL_COVERAGE_LEVELS.map((level, index) => [
             level,
@@ -3094,6 +3459,11 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
   const topAudiences = useMemo(() => aggregateDetails(detailRows, 'audience'), [detailRows]);
   const topGeo = useMemo(() => aggregateDetails(detailRows, 'geo'), [detailRows]);
   const topPlacements = useMemo(() => aggregateDetails(detailRows, 'placement'), [detailRows]);
+  const intraday = useMemo(
+    () => aggregateIntradaySpend(hourlyRows, orders, country),
+    [hourlyRows, orders, country]
+  );
+  const intradayDiagnostics = useMemo(() => buildIntradayDiagnostics(intraday), [intraday]);
   const providerCoverage = useMemo(
     () => aggregateProviderCoverage(campaignRows, detailRows, syncRuns, dateFrom, dateTo, detailCounts.byProvider),
     [campaignRows, detailRows, syncRuns, dateFrom, dateTo, detailCounts]
@@ -3271,6 +3641,8 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
       />
 
       <DecisionBriefPanel brief={decisionBrief} />
+
+      <IntradaySpendPanel intraday={intraday} diagnostics={intradayDiagnostics} country={country} />
 
       <DiagnosticMapPanel signals={diagnosticSignals} />
 
