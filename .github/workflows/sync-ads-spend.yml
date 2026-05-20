@@ -2,7 +2,7 @@ name: Sync Ads Spend
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '3,18,33,48 * * * *'
   workflow_dispatch:
     inputs:
       providers:
