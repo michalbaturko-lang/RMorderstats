@@ -56,6 +56,7 @@ const DAYS_FULL = ['Neděle', 'Pondělí', 'Úterý', 'Středa', 'Čtvrtek', 'P�
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const CURRENCY_RATES = { CZK: 1, EUR: 25.2, HUF: 0.063, RON: 5.1 };
 const MARKET_LABELS = { all: 'Všechny země', cz: 'Česko', sk: 'Slovensko', hu: 'Maďarsko', ro: 'Rumunsko', unknown: 'Neznámá země' };
+const MARKET_ORDER = ['cz', 'sk', 'hu', 'ro', 'unknown'];
 
 const BIG_CITIES = {
   cz: ['praha', 'brno', 'ostrava', 'plzeň', 'plzen', 'liberec', 'olomouc', 'budějovic', 'budejovic', 'hradec králové', 'hradec', 'ústí nad labem', 'usti', 'pardubice', 'zlín', 'zlin', 'havířov', 'havirov', 'kladno', 'most', 'opava', 'frýdek', 'frydek', 'karviná', 'karvina', 'jihlava', 'teplice', 'děčín', 'decin', 'karlovy vary'],
@@ -236,11 +237,12 @@ const emptyAdsSummary = () => ({
   conversionValue: 0,
   providers: [],
   markets: [],
+  marketBreakdown: [],
   firstDate: '',
   lastDate: '',
 });
 
-const AdsKpiStrip = ({ summary, revenue, onOpenAds }) => {
+const AdsKpiStrip = ({ summary, revenue, revenueByMarket = {}, onOpenAds }) => {
   const pno = revenue ? (summary.spend / revenue) * 100 : 0;
   const realRoas = summary.spend ? revenue / summary.spend : 0;
   const platformRoas = summary.spend ? summary.conversionValue / summary.spend : 0;
@@ -296,6 +298,27 @@ const AdsKpiStrip = ({ summary, revenue, onOpenAds }) => {
           <div className="text-xs text-slate-500">{hasMeta ? 'Google + Meta' : 'Meta čeká na přístup'}</div>
         </div>
       </div>
+
+      {summary.marketBreakdown?.length > 0 && (
+        <div className="mt-3 border-t border-amber-200 pt-3">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-800">Rozpad podle země</div>
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+            {summary.marketBreakdown.map((row) => {
+              const marketRevenue = revenueByMarket[row.market] || 0;
+              const marketPno = marketRevenue ? (row.spend / marketRevenue) * 100 : 0;
+              return (
+                <div key={row.market} className="rounded-lg border border-amber-200 bg-white/80 p-2">
+                  <div className="text-xs font-semibold text-slate-600">{MARKET_LABELS[row.market] || row.market.toUpperCase()}</div>
+                  <div className="mt-1 text-base font-bold text-red-700">{formatCurrency(row.spend)}</div>
+                  <div className="text-xs text-slate-500">
+                    PNO {marketRevenue ? formatPercent(marketPno) : 'bez tržeb'}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -769,6 +792,19 @@ export default function App() {
         const providers = [...new Set(rows.map(row => row.provider).filter(Boolean))].sort();
         const markets = [...new Set(rows.map(row => row.market).filter(Boolean))].sort();
         const dates = rows.map(row => row.date).filter(Boolean).sort();
+        const byMarket = new Map();
+
+        rows.forEach((row) => {
+          const market = row.market || 'unknown';
+          if (!byMarket.has(market)) {
+            byMarket.set(market, { market, spend: 0, clicks: 0, conversions: 0, conversionValue: 0 });
+          }
+          const target = byMarket.get(market);
+          target.spend += Number(row.spend_czk || 0);
+          target.clicks += Number(row.clicks || 0);
+          target.conversions += Number(row.conversions || 0);
+          target.conversionValue += Number(row.conversion_value_czk || 0);
+        });
 
         setAdsSummary({
           loading: false,
@@ -780,6 +816,13 @@ export default function App() {
           conversionValue: rows.reduce((sum, row) => sum + Number(row.conversion_value_czk || 0), 0),
           providers,
           markets,
+          marketBreakdown: Array.from(byMarket.values())
+            .sort((a, b) => {
+              const ai = MARKET_ORDER.indexOf(a.market);
+              const bi = MARKET_ORDER.indexOf(b.market);
+              if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+              return a.market.localeCompare(b.market);
+            }),
           firstDate: dates[0] || '',
           lastDate: dates[dates.length - 1] || '',
         });
@@ -802,6 +845,15 @@ export default function App() {
   }, [user, dateFrom, dateTo, country]);
 
   const filtered = useMemo(() => country === 'all' ? orders : orders.filter(o => o.market === country), [orders, country]);
+
+  const revenueByMarket = useMemo(() => {
+    const totals = {};
+    filtered.forEach((order) => {
+      const market = order.market || 'unknown';
+      totals[market] = (totals[market] || 0) + getRevenueWithoutVAT(order);
+    });
+    return totals;
+  }, [filtered]);
 
   // Zjisti které dny jsou aktivní (mají data)
   const activeDays = useMemo(() => {
@@ -1376,7 +1428,7 @@ export default function App() {
           <KPICard title="B2B podíl" value={`${kpis.b2bPct.toFixed(0)}%`} icon="🏢" sub={`🏙️ Velká města: ${kpis.bigPct.toFixed(0)}%`} />
         </div>
 
-        <AdsKpiStrip summary={adsSummary} revenue={kpis.revenue} onOpenAds={() => setTab('ads')} />
+        <AdsKpiStrip summary={adsSummary} revenue={kpis.revenue} revenueByMarket={revenueByMarket} onOpenAds={() => setTab('ads')} />
 
         {/* Tabs */}
         <div className="flex gap-1 bg-white p-1 rounded-xl shadow-sm border mb-4">
