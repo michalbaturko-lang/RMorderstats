@@ -440,10 +440,13 @@ function aggregateMarkets(rows, orderByMarket, dateFrom, dateTo) {
         days,
         coveragePct: expectedDays ? (days / expectedDays) * 100 : 0,
         realRevenue: orders.revenue,
+        exactRevenue: orders.exactRevenue,
         exactGrossProfit: orders.exactGrossProfit,
         grossProfitAfterAds: orders.exactGrossProfit - enriched.spend,
         realRoas: enriched.spend ? orders.revenue / enriched.spend : 0,
         pno: orders.revenue ? (enriched.spend / orders.revenue) * 100 : 0,
+        breakEvenPno: orders.revenue ? (orders.exactGrossProfit / orders.revenue) * 100 : 0,
+        pnoHeadroom: orders.revenue ? ((orders.exactGrossProfit - enriched.spend) / orders.revenue) * 100 : 0,
       };
     })
     .sort((a, b) => b.spend - a.spend);
@@ -487,9 +490,14 @@ function aggregateMarketsFromBusinessRows(rows, dateFrom, dateTo) {
         ...enriched,
         days,
         coveragePct: expectedDays ? (days / expectedDays) * 100 : 0,
+        exactRevenue: row.exactRevenue,
+        exactGrossProfit: row.exactGrossProfit,
+        realRevenue: row.realRevenue,
         grossProfitAfterAds: row.exactGrossProfit - enriched.spend,
         realRoas: enriched.spend ? row.realRevenue / enriched.spend : 0,
         pno: row.realRevenue ? (enriched.spend / row.realRevenue) * 100 : 0,
+        breakEvenPno: row.realRevenue ? (row.exactGrossProfit / row.realRevenue) * 100 : 0,
+        pnoHeadroom: row.realRevenue ? ((row.exactGrossProfit - enriched.spend) / row.realRevenue) * 100 : 0,
       };
     })
     .sort((a, b) => b.spend - a.spend);
@@ -1063,8 +1071,11 @@ function buildDecisionBrief({
     ))
     .sort((a, b) => b.conversionValue - a.conversionValue);
   const highPnoMarkets = markets
-    .filter((row) => row.realRevenue > 0 && row.spend >= minSpend && row.pno > Math.max(businessTotal.pno * 1.25, 8))
-    .sort((a, b) => b.pno - a.pno);
+    .filter((row) => row.realRevenue > 0 && row.spend >= minSpend && (
+      row.pnoHeadroom < 0 ||
+      row.pno > Math.max(businessTotal.pno * 1.25, 8)
+    ))
+    .sort((a, b) => a.pnoHeadroom - b.pnoHeadroom || b.pno - a.pno);
   const metaCoverage = providerCoverage.find((row) => row.provider === 'meta_ads');
   const googleCoverage = providerCoverage.find((row) => row.provider === 'google_ads');
   const activeDetailLevels = detailCoverage.filter((row) => row.rows > 0).length;
@@ -1085,16 +1096,16 @@ function buildDecisionBrief({
       title: 'Ochrana zisku',
       status: businessTotal.grossProfitAfterAds < 0
         ? 'kritické'
-        : businessTotal.spendToGrossProfit > 45
+        : businessTotal.pnoHeadroom < 3 || businessTotal.spendToGrossProfit > 45
           ? 'hlídat'
           : 'zdravé',
       tone: businessTotal.grossProfitAfterAds < 0
         ? 'critical'
-        : businessTotal.spendToGrossProfit > 45
+        : businessTotal.pnoHeadroom < 3 || businessTotal.spendToGrossProfit > 45
           ? 'warning'
           : 'good',
       value: formatCurrency(businessTotal.grossProfitAfterAds),
-      evidence: `PNO ${formatPercent(businessTotal.pno)}, Ads vs hrubý zisk ${formatPercent(businessTotal.spendToGrossProfit)}.`,
+      evidence: `PNO ${formatPercent(businessTotal.pno)}, strop ${formatPercent(businessTotal.breakEvenPno)}, rezerva ${formatSignedPercentagePoints(businessTotal.pnoHeadroom)}.`,
       action: businessTotal.grossProfitAfterAds < 0
         ? 'Nejdřív omezit spend, který nemá konverze nebo má nízkou hodnotu objednávky.'
         : 'Škálovat jen tam, kde po Ads zůstává kladný hrubý zisk a drží se AOV.',
@@ -1121,7 +1132,7 @@ function buildDecisionBrief({
       evidence: noConversionCampaigns[0]
         ? `${noConversionCampaigns[0].campaignName}: spend ${formatCurrency(noConversionCampaigns[0].spend)} bez konverzí.`
         : highPnoMarkets[0]
-          ? `${providerLabel(highPnoMarkets[0].provider)} / ${marketLabel(highPnoMarkets[0].market)}: PNO ${formatPercent(highPnoMarkets[0].pno)}.`
+          ? `${providerLabel(highPnoMarkets[0].provider)} / ${marketLabel(highPnoMarkets[0].market)}: PNO ${formatPercent(highPnoMarkets[0].pno)}, rezerva ${formatSignedPercentagePoints(highPnoMarkets[0].pnoHeadroom)}.`
           : 'Ve vybraném filtru není výrazný spend bez konverzí ani extrémní PNO segment.',
       action: 'Rozpočet nepřidávat plošně; přesouvat ho z úniků do kampaní s lepším AOV/ROAS.',
     }),
@@ -1584,6 +1595,15 @@ function buildPpcInsights({
       recommendation: 'Nejdřív škrtat nebo omezit části s nulovou konverzí a nízkou hodnotou objednávek; škálování řešit až po návratu nad nulu.',
       confidence: 'vysoká',
     }));
+  } else if (businessTotal.breakEvenPno > 0 && businessTotal.pnoHeadroom < 3) {
+    insights.push(insight({
+      severity: 'warning',
+      title: 'PNO je blízko maržového stropu',
+      finding: 'Vybrané období je ještě v plusu, ale reklama už je blízko hranici, kde by snědla celý přesný hrubý zisk.',
+      evidence: `PNO ${formatPercent(businessTotal.pno)}, maržový strop ${formatPercent(businessTotal.breakEvenPno)}, rezerva ${formatSignedPercentagePoints(businessTotal.pnoHeadroom)}.`,
+      recommendation: 'Další rozpočet přidávat jen do segmentů, které mají zdravé AOV a zisk po Ads. Slabší kampaně držet pod samostatným limitem PNO.',
+      confidence: 'vysoká',
+    }));
   } else if (businessTotal.spendToGrossProfit > 45) {
     insights.push(insight({
       severity: 'warning',
@@ -1628,7 +1648,7 @@ function buildPpcInsights({
       severity: 'critical',
       title: `Nejslabší trh po Ads: ${marketLabel(worstMarket.market)}`,
       finding: 'Jeden trh vychází po započtení reklam záporně.',
-      evidence: `${providerLabel(worstMarket.provider)} / ${marketLabel(worstMarket.market)}: spend ${formatCurrency(worstMarket.spend)}, real tržby ${formatCurrency(worstMarket.realRevenue)}, zisk po Ads ${formatCurrency(worstMarket.grossProfitAfterAds)}, PNO ${formatPercent(worstMarket.pno)}.`,
+      evidence: `${providerLabel(worstMarket.provider)} / ${marketLabel(worstMarket.market)}: spend ${formatCurrency(worstMarket.spend)}, real tržby ${formatCurrency(worstMarket.realRevenue)}, zisk po Ads ${formatCurrency(worstMarket.grossProfitAfterAds)}, PNO ${formatPercent(worstMarket.pno)}, rezerva ${formatSignedPercentagePoints(worstMarket.pnoHeadroom)}.`,
       recommendation: 'V tomto trhu projít kampaně a produktový mix; nepřidávat rozpočet, dokud není jasné, které kampaně nesou nízkou hodnotu objednávky.',
       confidence: 'vysoká',
     }));
@@ -1979,6 +1999,14 @@ function InsightCard({ item }) {
   );
 }
 
+function pnoHeadroomTone(value) {
+  return toNumber(value) < 0
+    ? 'text-red-700'
+    : toNumber(value) < 3
+      ? 'text-amber-700'
+      : 'text-emerald-700';
+}
+
 function OwnerPpcBrief({ insights, businessTotal, total, orderTotal }) {
   const priorityInsights = insights.slice(0, 3);
   const topSeverity = priorityInsights[0]?.severity;
@@ -2002,10 +2030,20 @@ function OwnerPpcBrief({ insights, businessTotal, total, orderTotal }) {
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
           <div className="text-xs font-medium text-slate-500">PNO</div>
           <div className="mt-1 text-lg font-bold text-slate-800">{formatPercent(businessTotal.pno)}</div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="text-xs font-medium text-slate-500">PNO strop</div>
+          <div className="mt-1 text-lg font-bold text-slate-800">{formatPercent(businessTotal.breakEvenPno)}</div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="text-xs font-medium text-slate-500">PNO rezerva</div>
+          <div className={`mt-1 text-lg font-bold ${pnoHeadroomTone(businessTotal.pnoHeadroom)}`}>
+            {formatSignedPercentagePoints(businessTotal.pnoHeadroom)}
+          </div>
         </div>
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
           <div className="text-xs font-medium text-slate-500">Real ROAS</div>
@@ -3003,10 +3041,14 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
   const total = useMemo(() => metricSummary(dailyRows), [dailyRows]);
   const businessTotal = useMemo(() => ({
     realRevenue: orderTotal.revenue,
+    exactRevenue: orderTotal.exactRevenue,
     exactGrossProfit: orderTotal.exactGrossProfit,
     grossProfitAfterAds: orderTotal.exactGrossProfit - total.spend,
     realRoas: total.spend ? orderTotal.revenue / total.spend : 0,
     pno: orderTotal.revenue ? (total.spend / orderTotal.revenue) * 100 : 0,
+    breakEvenPno: orderTotal.revenue ? (orderTotal.exactGrossProfit / orderTotal.revenue) * 100 : 0,
+    pnoHeadroom: orderTotal.revenue ? ((orderTotal.exactGrossProfit - total.spend) / orderTotal.revenue) * 100 : 0,
+    grossProfitPct: orderTotal.exactRevenue ? (orderTotal.exactGrossProfit / orderTotal.exactRevenue) * 100 : 0,
     spendToGrossProfit: orderTotal.exactGrossProfit ? (total.spend / orderTotal.exactGrossProfit) * 100 : 0,
   }), [orderTotal, total]);
   const daily = useMemo(
@@ -3201,12 +3243,14 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
         <Kpi label="Imprese" value={formatNumber(total.impressions)} sub={`${formatNumber(total.interactions)} interakcí`} />
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-8">
         <Kpi label="Real tržby" value={formatCurrency(businessTotal.realRevenue)} sub={`${formatNumber(orderTotal.orders)} obj.`} tone="blue" />
         <Kpi label="Přesný hrubý zisk" value={formatCurrency(businessTotal.exactGrossProfit)} sub={`${formatNumber(orderTotal.exactOrders)} přesných obj.`} tone="emerald" />
         <Kpi label="Zisk po Ads" value={formatCurrency(businessTotal.grossProfitAfterAds)} sub="hrubý zisk - spend" tone={businessTotal.grossProfitAfterAds >= 0 ? 'emerald' : 'amber'} />
         <Kpi label="Real ROAS" value={formatRatio(businessTotal.realRoas)} sub="tržby / spend" tone="blue" />
         <Kpi label="PNO" value={formatPercent(businessTotal.pno)} sub="spend / tržby" />
+        <Kpi label="PNO strop" value={formatPercent(businessTotal.breakEvenPno)} sub={`marže ${formatPercent(businessTotal.grossProfitPct)}`} tone="emerald" />
+        <Kpi label="PNO rezerva" value={formatSignedPercentagePoints(businessTotal.pnoHeadroom)} sub="strop - PNO" tone={businessTotal.pnoHeadroom < 0 ? 'amber' : 'emerald'} />
         <Kpi label="Ads vs zisk" value={formatPercent(businessTotal.spendToGrossProfit)} sub={`${formatNumber(orderTotal.missingCostOrders)} obj. bez přesné nákupky`} />
       </div>
 
@@ -3269,7 +3313,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
       <div>
         <h3 className="mb-2 text-sm font-semibold text-slate-800">Rozpad podle trhu</h3>
         <div className="overflow-x-auto rounded-lg border border-slate-200">
-          <table className="w-full min-w-[760px] text-sm">
+          <table className="w-full min-w-[980px] text-sm">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-3 py-2 text-left">Zdroj / trh</th>
@@ -3280,6 +3324,8 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
                 <th className="px-3 py-2 text-right">Real tržby</th>
                 <th className="px-3 py-2 text-right">Zisk po Ads</th>
                 <th className="px-3 py-2 text-right">PNO</th>
+                <th className="px-3 py-2 text-right">PNO strop</th>
+                <th className="px-3 py-2 text-right">Rezerva</th>
                 <th className="px-3 py-2 text-right">Konverze</th>
                 <th className="px-3 py-2 text-right">AOV</th>
                 <th className="px-3 py-2 text-right">CPC</th>
@@ -3301,6 +3347,8 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
                   <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.realRevenue)}</td>
                   <td className={`px-3 py-2 text-right font-semibold ${row.grossProfitAfterAds >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatCurrency(row.grossProfitAfterAds)}</td>
                   <td className="px-3 py-2 text-right text-slate-700">{formatPercent(row.pno)}</td>
+                  <td className="px-3 py-2 text-right text-slate-700">{formatPercent(row.breakEvenPno)}</td>
+                  <td className={`px-3 py-2 text-right font-semibold ${pnoHeadroomTone(row.pnoHeadroom)}`}>{formatSignedPercentagePoints(row.pnoHeadroom)}</td>
                   <td className="px-3 py-2 text-right text-slate-700">{formatNumber(row.conversions)}</td>
                   <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.aov)}</td>
                   <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.cpc)}</td>
@@ -3308,7 +3356,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
               ))}
               {!markets.length && (
                 <tr>
-                  <td colSpan={11} className="px-3 py-4 text-center text-slate-500">Pro zvolené období nejsou Ads data.</td>
+                  <td colSpan={13} className="px-3 py-4 text-center text-slate-500">Pro zvolené období nejsou Ads data.</td>
                 </tr>
               )}
             </tbody>
