@@ -523,7 +523,12 @@ function aggregateDetails(rows, level) {
     .slice(0, 12);
 }
 
-function aggregateProviderCoverage(campaignRows, detailRows, syncRuns, dateFrom, dateTo) {
+function finiteCount(value) {
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? count : null;
+}
+
+function aggregateProviderCoverage(campaignRows, detailRows, syncRuns, dateFrom, dateTo, detailCountByProvider = {}) {
   const expectedDays = inclusiveDayCount(dateFrom, dateTo);
   const byProvider = new Map(EXPECTED_PROVIDERS.map((provider) => [provider, {
     provider,
@@ -586,15 +591,26 @@ function aggregateProviderCoverage(campaignRows, detailRows, syncRuns, dateFrom,
   }
 
   return Array.from(byProvider.values()).map((row) => ({
-    ...enrichMetrics(row),
-    days: row.dates.size,
-    coveragePct: expectedDays ? (row.dates.size / expectedDays) * 100 : 0,
-    hasData: row.campaignRows > 0 || row.spend > 0,
-    hasDeepDetail: row.detailRows > 0 || Boolean(row.latestDeepDetailRun),
-  }));
+    ...row,
+    detailRowsExact: finiteCount(detailCountByProvider[row.provider]),
+  })).map((row) => {
+    const enriched = enrichMetrics(row);
+    const detailRowsLoaded = row.detailRows;
+    const detailRowsTotal = row.detailRowsExact ?? detailRowsLoaded;
+    return {
+      ...enriched,
+      detailRows: detailRowsTotal,
+      detailRowsLoaded,
+      hasExactDetailCount: row.detailRowsExact !== null,
+      days: row.dates.size,
+      coveragePct: expectedDays ? (row.dates.size / expectedDays) * 100 : 0,
+      hasData: row.campaignRows > 0 || row.spend > 0,
+      hasDeepDetail: detailRowsTotal > 0 || Boolean(row.latestDeepDetailRun),
+    };
+  });
 }
 
-function aggregateDetailCoverage(rows) {
+function aggregateDetailCoverage(rows, detailCountByLevel = {}) {
   const byLevel = new Map(DETAIL_COVERAGE_LEVELS.map((level) => [level, {
     level,
     rows: 0,
@@ -608,7 +624,17 @@ function aggregateDetailCoverage(rows) {
     addMetrics(target, row);
   }
 
-  return Array.from(byLevel.values()).map(enrichMetrics);
+  return Array.from(byLevel.values()).map((row) => {
+    const enriched = enrichMetrics(row);
+    const loadedRows = row.rows;
+    const exactRows = finiteCount(detailCountByLevel[row.level]);
+    return {
+      ...enriched,
+      loadedRows,
+      rows: exactRows ?? loadedRows,
+      hasExactCount: exactRows !== null,
+    };
+  });
 }
 
 function insight({ severity = 'info', title, finding, evidence, recommendation, confidence = 'střední' }) {
@@ -1128,6 +1154,9 @@ function ProviderCoverageCard({ row }) {
         <div>
           <div className="opacity-70">Detailní řádky</div>
           <div className="font-semibold">{formatNumber(row.detailRows)}</div>
+          {row.hasExactDetailCount && row.detailRowsLoaded !== row.detailRows && (
+            <div className="opacity-70">top načteno {formatNumber(row.detailRowsLoaded)}</div>
+          )}
         </div>
       </div>
       <div className="mt-2 space-y-1 text-xs leading-relaxed opacity-80">
@@ -1213,6 +1242,7 @@ function DataReadinessPanel({ providerCoverage, detailCoverage, orderTotal, busi
             }`}
           >
             {LEVEL_LABELS[row.level] || row.level}: {formatNumber(row.rows)}
+            {row.hasExactCount && row.loadedRows !== row.rows ? ` · top ${formatNumber(row.loadedRows)}` : ''}
           </span>
         ))}
       </div>
@@ -1352,6 +1382,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
   const [campaignRows, setCampaignRows] = useState([]);
   const [campaignMetaRows, setCampaignMetaRows] = useState([]);
   const [detailRows, setDetailRows] = useState([]);
+  const [detailCounts, setDetailCounts] = useState({ byLevel: {}, byProvider: {} });
   const [syncRuns, setSyncRuns] = useState([]);
   const [businessDailyRows, setBusinessDailyRows] = useState([]);
   const [businessProviderRows, setBusinessProviderRows] = useState([]);
@@ -1399,6 +1430,25 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
           .range(0, DETAIL_LEVEL_ROW_LIMIT - 1)
       ));
 
+      const detailCountQueries = DETAIL_COVERAGE_LEVELS.map((level) => applyMarket(
+        supabaseClient
+          .from('ad_metrics_daily')
+          .select('id', { count: 'exact', head: true })
+          .gte('date', dateFrom)
+          .lte('date', dateTo)
+          .eq('level', level)
+      ));
+
+      const providerDetailCountQueries = EXPECTED_PROVIDERS.map((provider) => applyMarket(
+        supabaseClient
+          .from('ad_metrics_daily')
+          .select('id', { count: 'exact', head: true })
+          .gte('date', dateFrom)
+          .lte('date', dateTo)
+          .eq('provider', provider)
+          .in('level', DETAIL_COVERAGE_LEVELS)
+      ));
+
       const metaQuery = country && country !== 'all'
         ? supabaseClient.from('ad_campaigns').select('*').eq('market', country).range(0, 999)
         : supabaseClient.from('ad_campaigns').select('*').range(0, 999);
@@ -1429,15 +1479,20 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
           .range(0, 9999)
       );
 
-      const [campaignMetricResult, metaResult, runsResult, businessDailyResult, businessProviderResult, ...detailResults] = await Promise.all([
+      const [campaignMetricResult, metaResult, runsResult, businessDailyResult, businessProviderResult, ...detailAndCountResults] = await Promise.all([
         campaignMetricQuery,
         metaQuery,
         runsQuery,
         businessDailyQuery,
         businessProviderQuery,
         ...detailQueries,
+        ...detailCountQueries,
+        ...providerDetailCountQueries,
       ]);
 
+      const detailResults = detailAndCountResults.slice(0, DETAIL_COVERAGE_LEVELS.length);
+      const detailCountResults = detailAndCountResults.slice(DETAIL_COVERAGE_LEVELS.length, DETAIL_COVERAGE_LEVELS.length * 2);
+      const providerDetailCountResults = detailAndCountResults.slice(DETAIL_COVERAGE_LEVELS.length * 2);
       const firstError = [campaignMetricResult, metaResult, runsResult, ...detailResults].find((result) => result.error)?.error;
       if (firstError) throw firstError;
 
@@ -1449,6 +1504,16 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
         setDailyRows(campaignMetricResult.data || []);
         setCampaignRows(campaignMetricResult.data || []);
         setDetailRows(detailResults.flatMap((result) => result.data || []));
+        setDetailCounts({
+          byLevel: Object.fromEntries(DETAIL_COVERAGE_LEVELS.map((level, index) => [
+            level,
+            detailCountResults[index]?.error ? null : detailCountResults[index]?.count,
+          ])),
+          byProvider: Object.fromEntries(EXPECTED_PROVIDERS.map((provider, index) => [
+            provider,
+            providerDetailCountResults[index]?.error ? null : providerDetailCountResults[index]?.count,
+          ])),
+        });
         setCampaignMetaRows(metaResult.data || []);
         setSyncRuns(runsResult.data || []);
         setBusinessDailyRows(businessAvailable ? (businessDailyResult.data || []) : []);
@@ -1536,8 +1601,14 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
   const topAudiences = useMemo(() => aggregateDetails(detailRows, 'audience'), [detailRows]);
   const topGeo = useMemo(() => aggregateDetails(detailRows, 'geo'), [detailRows]);
   const topPlacements = useMemo(() => aggregateDetails(detailRows, 'placement'), [detailRows]);
-  const providerCoverage = useMemo(() => aggregateProviderCoverage(campaignRows, detailRows, syncRuns, dateFrom, dateTo), [campaignRows, detailRows, syncRuns, dateFrom, dateTo]);
-  const detailCoverage = useMemo(() => aggregateDetailCoverage(detailRows), [detailRows]);
+  const providerCoverage = useMemo(
+    () => aggregateProviderCoverage(campaignRows, detailRows, syncRuns, dateFrom, dateTo, detailCounts.byProvider),
+    [campaignRows, detailRows, syncRuns, dateFrom, dateTo, detailCounts]
+  );
+  const detailCoverage = useMemo(
+    () => aggregateDetailCoverage(detailRows, detailCounts.byLevel),
+    [detailRows, detailCounts]
+  );
   const ppcInsights = useMemo(() => buildPpcInsights({
     total,
     businessTotal,
