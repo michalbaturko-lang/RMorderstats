@@ -1,0 +1,95 @@
+name: Ensure Ads Spend Freshness
+
+on:
+  schedule:
+    - cron: '8,23,38,53 * * * *'
+  workflow_dispatch:
+    inputs:
+      max_age_minutes:
+        description: 'Run campaign-only spend sync when latest Google campaign sync is older than this many minutes.'
+        required: false
+        default: '25'
+      markets:
+        description: 'Markets, for example cz or cz,sk,hu,ro'
+        required: false
+        default: ''
+
+concurrency:
+  group: ensure-ads-spend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ensure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run verify:ads-readonly
+
+      - name: Check Google campaign spend freshness
+        id: freshness
+        continue-on-error: true
+        run: npm run check:ads-sync-health
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SYNC_MARKETS: ${{ github.event.inputs.markets || vars.SYNC_MARKETS || 'cz,sk,hu,ro' }}
+          ADS_HEALTH_EXPECTED_PROVIDERS: google_ads
+          ADS_HEALTH_EXPECTED_MARKETS: ${{ github.event.inputs.markets || vars.SYNC_MARKETS || 'cz,sk,hu,ro' }}
+          ADS_HEALTH_MAX_SYNC_AGE_MINUTES: ${{ github.event.inputs.max_age_minutes || vars.ADS_FRESHNESS_WATCHDOG_MAX_AGE_MINUTES || '25' }}
+          ADS_HEALTH_REQUIRE_CURRENT_ROWS: '0'
+          ADS_HEALTH_REQUIRE_MARKET_ROWS: '0'
+          ADS_HEALTH_REQUIRE_ROWS_UPSERTED: '1'
+
+      - name: Repair stale Google campaign spend
+        if: steps.freshness.outcome == 'failure'
+        run: npm run sync:ads-analytics
+        env:
+          ADS_SYNC_PROVIDERS: ${{ vars.ADS_SPEND_PROVIDERS || 'google_ads,meta_ads' }}
+          ADS_SYNC_SKIP_MISSING_SECRETS: '1'
+          SYNC_MARKETS: ${{ github.event.inputs.markets || vars.SYNC_MARKETS || '' }}
+          SYNC_DAYS_BACK: ${{ vars.ADS_SPEND_DAYS_BACK || '1' }}
+          FX_RATES_JSON: ${{ vars.FX_RATES_JSON || '{"CZK":1,"EUR":25.2,"HUF":0.063,"RON":5.1}' }}
+
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+          GOOGLE_ADS_DEVELOPER_TOKEN: ${{ secrets.GOOGLE_ADS_DEVELOPER_TOKEN }}
+          GOOGLE_ADS_CLIENT_ID: ${{ secrets.GOOGLE_ADS_CLIENT_ID }}
+          GOOGLE_ADS_CLIENT_SECRET: ${{ secrets.GOOGLE_ADS_CLIENT_SECRET }}
+          GOOGLE_ADS_REFRESH_TOKEN: ${{ secrets.GOOGLE_ADS_REFRESH_TOKEN }}
+          GOOGLE_ADS_BASE44_APP_ID: ${{ secrets.GOOGLE_ADS_BASE44_APP_ID }}
+          GOOGLE_ADS_BASE44_ACCESS_TOKEN: ${{ secrets.GOOGLE_ADS_BASE44_ACCESS_TOKEN }}
+          GOOGLE_ADS_BASE44_TOKEN_ACCOUNT_ID: ${{ secrets.GOOGLE_ADS_BASE44_TOKEN_ACCOUNT_ID }}
+          GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${{ secrets.GOOGLE_ADS_LOGIN_CUSTOMER_ID }}
+          GOOGLE_ADS_ACCOUNTS_JSON: ${{ secrets.GOOGLE_ADS_ACCOUNTS_JSON }}
+          GOOGLE_ADS_API_VERSION: ${{ vars.GOOGLE_ADS_API_VERSION || 'v23' }}
+          GOOGLE_ADS_DETAIL_LEVELS: campaign
+
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          META_ADS_ACCOUNTS_JSON: ${{ secrets.META_ADS_ACCOUNTS_JSON }}
+          META_GRAPH_API_VERSION: ${{ vars.META_GRAPH_API_VERSION || 'v24.0' }}
+          META_ADS_DETAIL_LEVELS: campaign
+
+      - name: Verify spend freshness after repair
+        if: steps.freshness.outcome == 'failure'
+        run: npm run check:ads-sync-health
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SYNC_MARKETS: ${{ github.event.inputs.markets || vars.SYNC_MARKETS || 'cz,sk,hu,ro' }}
+          ADS_HEALTH_EXPECTED_PROVIDERS: google_ads
+          ADS_HEALTH_EXPECTED_MARKETS: ${{ github.event.inputs.markets || vars.SYNC_MARKETS || 'cz,sk,hu,ro' }}
+          ADS_HEALTH_MAX_SYNC_AGE_MINUTES: '45'
+          ADS_HEALTH_REQUIRE_CURRENT_ROWS: '0'
+          ADS_HEALTH_REQUIRE_MARKET_ROWS: '0'
+          ADS_HEALTH_REQUIRE_ROWS_UPSERTED: '1'
