@@ -67,6 +67,7 @@ const sumBy = (rows, getter) => rows.reduce((sum, row) => sum + toNumber(getter(
 
 const formatNumber = (value) => Math.round(toNumber(value)).toLocaleString('cs-CZ');
 const formatCurrency = (value) => `${formatNumber(value)} Kč`;
+const formatSignedCurrency = (value) => `${toNumber(value) > 0 ? '+' : ''}${formatCurrency(value)}`;
 const formatPercent = (value) => `${toNumber(value).toFixed(1)} %`;
 const formatRatio = (value) => toNumber(value).toFixed(2).replace('.', ',');
 const formatDate = (value) => {
@@ -865,6 +866,64 @@ function compareCampaignRows(currentCampaigns, previousCampaigns) {
     .slice(0, 8);
 }
 
+function buildAovDrivers({ currentRows, previousRows, currentTotal, previousTotal, type }) {
+  if (currentTotal.conversions <= 0 || previousTotal.conversions <= 0) return [];
+
+  const previousMap = new Map(previousRows.map((row) => [row.key, row]));
+  const currentMap = new Map(currentRows.map((row) => [row.key, row]));
+  const keys = new Set([...currentMap.keys(), ...previousMap.keys()]);
+
+  return Array.from(keys)
+    .map((key) => {
+      const current = currentMap.get(key);
+      const previous = previousMap.get(key);
+      const currentConversions = toNumber(current?.conversions);
+      const previousConversions = toNumber(previous?.conversions);
+      const currentShare = currentConversions / currentTotal.conversions;
+      const previousShare = previousConversions / previousTotal.conversions;
+      const currentAov = toNumber(current?.aov);
+      const previousAov = toNumber(previous?.aov);
+      const previousReferenceAov = previousAov || previousTotal.aov || 0;
+      const currentReferenceAov = currentAov || 0;
+      const mixEffect = (currentShare - previousShare) * previousReferenceAov;
+      const aovEffect = currentShare * (currentReferenceAov - previousReferenceAov);
+      const impact = mixEffect + aovEffect;
+      const row = current || previous || {};
+
+      return {
+        key: `${type}:${key}`,
+        type,
+        label: type === 'market'
+          ? `${providerLabel(row.provider)} / ${marketLabel(row.market)}`
+          : row.campaignName || 'Bez názvu kampaně',
+        subLabel: type === 'market'
+          ? null
+          : `${providerLabel(row.provider)} / ${marketLabel(row.market)}`,
+        currentAov,
+        previousAov,
+        currentConversions,
+        previousConversions,
+        currentSharePct: currentShare * 100,
+        previousSharePct: previousShare * 100,
+        shareDeltaPct: (currentShare - previousShare) * 100,
+        currentSpend: toNumber(current?.spend),
+        previousSpend: toNumber(previous?.spend),
+        impact,
+        mixEffect,
+        aovEffect,
+      };
+    })
+    .filter((row) => (
+      Math.abs(row.impact) >= 50 ||
+      Math.abs(row.mixEffect) >= 50 ||
+      Math.abs(row.aovEffect) >= 50 ||
+      row.currentConversions >= 2 ||
+      row.previousConversions >= 2
+    ))
+    .sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact))
+    .slice(0, 8);
+}
+
 function buildCampaignActions({ campaigns, total, periodComparison }) {
   const moverByKey = new Map((periodComparison?.campaignMovers || []).map((row) => [row.key, row]));
   const minSpend = Math.max(total.spend * 0.04, 300);
@@ -1269,6 +1328,20 @@ function buildPeriodComparison({
   }
   const marketMovers = compareMarketRows(currentMarkets, previousMarkets, currentTotal, previousTotal);
   const campaignMovers = compareCampaignRows(currentCampaigns, previousCampaigns);
+  const marketAovDrivers = buildAovDrivers({
+    currentRows: currentMarkets,
+    previousRows: previousMarkets,
+    currentTotal,
+    previousTotal,
+    type: 'market',
+  });
+  const campaignAovDrivers = buildAovDrivers({
+    currentRows: currentCampaigns,
+    previousRows: previousCampaigns,
+    currentTotal,
+    previousTotal,
+    type: 'campaign',
+  });
   const signals = [];
 
   if (!previousRange || !previousHasData) {
@@ -1279,6 +1352,8 @@ function buildPeriodComparison({
       summary,
       marketMovers: [],
       campaignMovers: [],
+      marketAovDrivers: [],
+      campaignAovDrivers: [],
       signals: [
         insight({
           severity: 'info',
@@ -1415,7 +1490,17 @@ function buildPeriodComparison({
     }));
   }
 
-  return { currentRange, previousRange, previousHasData, summary, marketMovers, campaignMovers, signals: signals.slice(0, 4) };
+  return {
+    currentRange,
+    previousRange,
+    previousHasData,
+    summary,
+    marketMovers,
+    campaignMovers,
+    marketAovDrivers,
+    campaignAovDrivers,
+    signals: signals.slice(0, 4),
+  };
 }
 
 function buildPpcInsights({
@@ -2177,6 +2262,60 @@ function MovementTable({ title, rows, showShare = false }) {
   );
 }
 
+function AovDriverTable({ title, rows }) {
+  if (!rows?.length) return null;
+
+  return (
+    <div>
+      <h4 className="mb-2 text-sm font-semibold text-slate-800">{title}</h4>
+      <div className="overflow-x-auto rounded-lg border border-slate-200">
+        <table className="w-full min-w-[900px] text-sm">
+          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-3 py-2 text-left">Segment</th>
+              <th className="px-3 py-2 text-right">Dopad na AOV</th>
+              <th className="px-3 py-2 text-right">Mix efekt</th>
+              <th className="px-3 py-2 text-right">AOV efekt</th>
+              <th className="px-3 py-2 text-right">AOV</th>
+              <th className="px-3 py-2 text-right">Podíl konv.</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map((row) => (
+              <tr key={row.key} className="hover:bg-slate-50">
+                <td className="px-3 py-2">
+                  <div className="font-semibold text-slate-800">{row.label}</div>
+                  {row.subLabel && <div className="text-xs text-slate-400">{row.subLabel}</div>}
+                </td>
+                <td className={`px-3 py-2 text-right font-bold ${changeTone(row.impact)}`}>
+                  {formatSignedCurrency(row.impact)}
+                </td>
+                <td className={`px-3 py-2 text-right font-semibold ${changeTone(row.mixEffect)}`}>
+                  <div>{formatSignedCurrency(row.mixEffect)}</div>
+                  <div className="text-xs text-slate-400">změna podílu</div>
+                </td>
+                <td className={`px-3 py-2 text-right font-semibold ${changeTone(row.aovEffect)}`}>
+                  <div>{formatSignedCurrency(row.aovEffect)}</div>
+                  <div className="text-xs text-slate-400">změna hodnoty</div>
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <div className="font-semibold text-slate-800">{formatCurrency(row.currentAov)}</div>
+                  <div className="text-xs text-slate-400">předtím {formatCurrency(row.previousAov)}</div>
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <div className="font-semibold text-slate-800">{formatPercent(row.currentSharePct)}</div>
+                  <div className={`text-xs ${changeTone(row.shareDeltaPct)}`}>{formatSignedPercentagePoints(row.shareDeltaPct)}</div>
+                  <div className="text-xs text-slate-400">{formatNumber(row.currentConversions)} konv.</div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function PeriodComparisonPanel({ comparison }) {
   if (!comparison) return null;
   const rangeLabel = comparison.previousRange
@@ -2204,6 +2343,16 @@ function PeriodComparisonPanel({ comparison }) {
       </div>
       {comparison.previousHasData && (
         <div className="mt-4 grid gap-4">
+          <div>
+            <h3 className="mb-1 text-sm font-semibold text-slate-800">Co hýbe platformním AOV</h3>
+            <div className="mb-3 text-xs text-slate-500">
+              Odhad rozkladu změny průměrné hodnoty konverze: mix efekt ukazuje přesun podílu konverzí, AOV efekt ukazuje změnu hodnoty uvnitř segmentu.
+            </div>
+            <div className="grid gap-4">
+              <AovDriverTable title="AOV driver podle zemí" rows={comparison.marketAovDrivers} />
+              <AovDriverTable title="AOV driver podle kampaní" rows={comparison.campaignAovDrivers} />
+            </div>
+          </div>
           <MovementTable title="Největší změny podle zemí" rows={comparison.marketMovers} showShare />
           <MovementTable title="Největší změny podle kampaní" rows={comparison.campaignMovers} />
         </div>
