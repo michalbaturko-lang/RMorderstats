@@ -242,11 +242,25 @@ function summarizeDetailRows(rows) {
   return byKey;
 }
 
+function syncTypeLevels(syncType) {
+  const [, rawLevels = ''] = String(syncType || '').split(':');
+  return rawLevels.split(',').map((level) => level.trim()).filter(Boolean);
+}
+
+function isDeepDetailRun(run) {
+  if (!String(run.sync_type || '').startsWith('detail:')) return false;
+  return syncTypeLevels(run.sync_type).some((level) => level !== 'campaign');
+}
+
 function latestProviderRun(runs, provider, level) {
   return (runs || []).find((run) => (
     run.provider === provider &&
     String(run.sync_type || '').includes(level)
   ));
+}
+
+function latestProviderDeepDetailRun(runs, provider) {
+  return (runs || []).find((run) => run.provider === provider && isDeepDetailRun(run));
 }
 
 function printSecretStatus(label, status, blockers) {
@@ -271,7 +285,7 @@ function printLatestRuns(runs, providers) {
   const now = new Date();
   for (const provider of providers) {
     const campaignRun = latestProviderRun(runs, provider, 'campaign');
-    const detailRun = latestProviderRun(runs, provider, 'detail:');
+    const detailRun = latestProviderDeepDetailRun(runs, provider);
 
     if (campaignRun) {
       const age = ageMinutes(campaignRun.finished_at || campaignRun.started_at, now);
@@ -290,7 +304,7 @@ function printLatestRuns(runs, providers) {
     if (detailRun) {
       const age = ageMinutes(detailRun.finished_at || detailRun.started_at, now);
       console.log([
-        `[marketing-status] latest ${provider} detail`,
+        `[marketing-status] latest ${provider} deep detail`,
         `status=${detailRun.status}`,
         `sync_type=${detailRun.sync_type}`,
         `range=${detailRun.range_from}..${detailRun.range_to}`,
@@ -298,7 +312,7 @@ function printLatestRuns(runs, providers) {
         `age_minutes=${Number.isFinite(age) ? age.toFixed(1) : 'n/a'}`,
       ].join(' | '));
     } else {
-      console.log(`[marketing-status] latest ${provider} detail: missing`);
+      console.log(`[marketing-status] latest ${provider} deep detail: missing`);
     }
   }
 }
@@ -364,7 +378,8 @@ async function main() {
   const serviceRoleKey = requireEnv('SUPABASE_SERVICE_ROLE_KEY');
   const providers = parseCsv(process.env.MARKETING_STATUS_PROVIDERS, DEFAULT_PROVIDERS);
   const markets = parseCsv(process.env.MARKETING_STATUS_MARKETS || process.env.SYNC_MARKETS, DEFAULT_MARKETS);
-  const detailLevels = parseCsv(process.env.MARKETING_STATUS_DETAIL_LEVELS, DEFAULT_DETAIL_LEVELS);
+  const detailLevels = parseCsv(process.env.MARKETING_STATUS_DETAIL_LEVELS, DEFAULT_DETAIL_LEVELS)
+    .filter((level) => level !== 'campaign');
   const from = process.env.MARKETING_STATUS_FROM_DATE || defaultYearStart();
   const to = process.env.MARKETING_STATUS_TO_DATE || todayUtc();
   const healthDate = process.env.MARKETING_STATUS_HEALTH_DATE || defaultHealthDate();
