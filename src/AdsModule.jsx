@@ -1139,6 +1139,105 @@ function buildDecisionBrief({
   };
 }
 
+function diagnosticArea(level) {
+  return {
+    search_term: 'Dotazy',
+    shopping_product: 'Produkty',
+    keyword: 'Keywords',
+    ad_group: 'Sestavy',
+    ad: 'Reklamy',
+    asset_group: 'PMax asset groups',
+    device: 'Zařízení',
+    geo: 'Geo',
+    hour: 'Hodiny',
+    audience: 'Meta audience',
+    placement: 'Meta placement',
+    conversion_action: 'Konverzní akce',
+  }[level] || LEVEL_LABELS[level] || level;
+}
+
+function buildDiagnosticMap({ sections, total, businessTotal, orderTotal }) {
+  const referenceAov = orderTotal.orders ? businessTotal.realRevenue / orderTotal.orders : total.aov;
+  const minSpend = Math.max(total.spend * 0.025, 200);
+  const highSpend = Math.max(total.spend * 0.08, 500);
+  const weakRoasLimit = Math.max(total.roas * 0.5, 1.1);
+  const strongRoasLimit = Math.max(total.roas * 1.2, businessTotal.realRoas * 0.9, 2);
+  const lowAovLimit = referenceAov ? referenceAov * 0.72 : 0;
+  const signals = [];
+
+  for (const section of sections) {
+    for (const row of section.rows || []) {
+      if (row.spend < minSpend && row.conversions <= 0) continue;
+
+      const base = {
+        key: `${section.key}:${row.key}`,
+        area: diagnosticArea(section.key),
+        label: row.label,
+        subLabel: row.subLabel,
+        campaignName: row.campaignName,
+        market: row.market,
+        spend: row.spend,
+        clicks: row.clicks,
+        conversions: row.conversions,
+        aov: row.aov,
+        roas: row.roas,
+        conversionValue: row.conversionValue,
+      };
+
+      if (row.spend >= highSpend && row.conversions <= 0) {
+        signals.push({
+          ...base,
+          priority: 0,
+          tone: 'critical',
+          signal: 'Únik rozpočtu',
+          evidence: `Spend ${formatCurrency(row.spend)}, ${formatNumber(row.clicks)} kliků, bez konverze.`,
+          action: 'Zkontrolovat relevanci, landing page a atribuční zpoždění; pokud nejde o výjimku, izolovat nebo omezit.',
+        });
+        continue;
+      }
+
+      if (lowAovLimit > 0 && row.conversions > 0 && row.aov > 0 && row.aov < lowAovLimit) {
+        signals.push({
+          ...base,
+          priority: 1,
+          tone: 'warning',
+          signal: 'Táhne AOV dolů',
+          evidence: `AOV ${formatCurrency(row.aov)} vs reference ${formatCurrency(referenceAov)}, spend ${formatCurrency(row.spend)}.`,
+          action: 'Porovnat produktový mix a oddělit nízkohodnotný provoz od kampaní, které mají nést větší objednávky.',
+        });
+        continue;
+      }
+
+      if (row.spend >= highSpend && row.roas > 0 && row.roas < weakRoasLimit) {
+        signals.push({
+          ...base,
+          priority: 2,
+          tone: 'warning',
+          signal: 'Slabá návratnost',
+          evidence: `ROAS ${formatRatio(row.roas)} při spendu ${formatCurrency(row.spend)}; účet ${formatRatio(total.roas)}.`,
+          action: 'Rozpadnout o vrstvu níž a hledat, zda slabost dělá query, produkt, zařízení, geo nebo publikum.',
+        });
+        continue;
+      }
+
+      if (row.spend >= highSpend && row.conversions > 0 && row.roas >= strongRoasLimit && (!referenceAov || row.aov >= referenceAov * 0.85)) {
+        signals.push({
+          ...base,
+          priority: 4,
+          tone: 'good',
+          signal: 'Kandidát na škálování',
+          evidence: `ROAS ${formatRatio(row.roas)}, AOV ${formatCurrency(row.aov)}, spend ${formatCurrency(row.spend)}.`,
+          action: 'Přidávat opatrně a po navýšení sledovat, zda neklesá AOV, marže a zisk po Ads.',
+        });
+      }
+    }
+  }
+
+  return signals
+    .sort((a, b) => a.priority - b.priority || b.spend - a.spend)
+    .slice(0, 12);
+}
+
 function buildPeriodComparison({
   currentRange,
   previousRange,
@@ -1913,6 +2012,75 @@ function DecisionBriefPanel({ brief }) {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function DiagnosticMapPanel({ signals }) {
+  const toneClass = {
+    critical: 'border-red-200 bg-red-50 text-red-800',
+    warning: 'border-amber-200 bg-amber-50 text-amber-800',
+    good: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    info: 'border-blue-200 bg-blue-50 text-blue-800',
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
+      <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-800">Diagnostická mapa PPC</h3>
+          <div className="mt-1 text-sm text-slate-500">Nejsilnější segmenty z detailních vrstev, které stojí za ruční kontrolu v Ads.</div>
+        </div>
+        <div className="text-xs text-slate-500">{formatNumber(signals.length)} signálů</div>
+      </div>
+
+      {!signals.length ? (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+          Ve zvoleném filtru zatím není dost detailních dat pro diagnostickou mapu.
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-slate-200">
+          <table className="w-full min-w-[1050px] text-sm">
+            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-3 py-2 text-left">Signál</th>
+                <th className="px-3 py-2 text-left">Segment</th>
+                <th className="px-3 py-2 text-left">Důkaz</th>
+                <th className="px-3 py-2 text-right">Spend</th>
+                <th className="px-3 py-2 text-right">ROAS</th>
+                <th className="px-3 py-2 text-right">AOV</th>
+                <th className="px-3 py-2 text-left">Další krok</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {signals.map((row) => (
+                <tr key={row.key} className="hover:bg-slate-50">
+                  <td className="px-3 py-2 align-top">
+                    <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-semibold ${toneClass[row.tone] || toneClass.info}`}>
+                      {row.signal}
+                    </span>
+                    <div className="mt-1 text-xs text-slate-400">{row.area}</div>
+                  </td>
+                  <td className="px-3 py-2 align-top">
+                    <div className="max-w-[280px] truncate font-semibold text-slate-800">{row.label}</div>
+                    <div className="text-xs text-slate-400">
+                      {marketLabel(row.market)}{row.subLabel ? ` · ${row.subLabel}` : ''}
+                    </div>
+                    {row.campaignName && (
+                      <div className="mt-1 max-w-[280px] truncate text-xs text-slate-500">{row.campaignName}</div>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 align-top text-xs leading-relaxed text-slate-600">{row.evidence}</td>
+                  <td className="px-3 py-2 text-right align-top font-semibold text-red-700">{formatCurrency(row.spend)}</td>
+                  <td className="px-3 py-2 text-right align-top font-bold text-slate-800">{formatRatio(row.roas)}</td>
+                  <td className="px-3 py-2 text-right align-top text-slate-700">{formatCurrency(row.aov)}</td>
+                  <td className="px-3 py-2 align-top text-xs leading-relaxed text-slate-600">{row.action}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -2821,6 +2989,28 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
     { key: 'geo', title: LEVEL_LABELS.geo, rows: topGeo },
     { key: 'placement', title: LEVEL_LABELS.placement, rows: topPlacements },
   ];
+  const diagnosticSignals = useMemo(() => buildDiagnosticMap({
+    sections: detailSections,
+    total,
+    businessTotal,
+    orderTotal,
+  }), [
+    topAdGroups,
+    topDevices,
+    topAds,
+    topKeywords,
+    topSearchTerms,
+    topProducts,
+    topAssetGroups,
+    topHours,
+    topConversionActions,
+    topAudiences,
+    topGeo,
+    topPlacements,
+    total,
+    businessTotal,
+    orderTotal,
+  ]);
   const visibleDetailSections = detailSections.filter((section) => section.rows.length);
   const emptyDetailLabels = detailSections
     .filter((section) => !section.rows.length)
@@ -2888,6 +3078,8 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
       />
 
       <DecisionBriefPanel brief={decisionBrief} />
+
+      <DiagnosticMapPanel signals={diagnosticSignals} />
 
       <div>
         <div className="mb-3 flex items-center justify-between gap-3">
