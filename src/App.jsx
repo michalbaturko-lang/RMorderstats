@@ -219,11 +219,18 @@ const getDatePreset = (preset) => {
   }
 };
 
-const KPICard = ({ title, value, icon, sub }) => (
+const kpiSubToneClass = {
+  muted: 'text-slate-400',
+  red: 'font-semibold text-red-700',
+  amber: 'font-semibold text-amber-700',
+  blue: 'font-semibold text-blue-700',
+};
+
+const KPICard = ({ title, value, icon, sub, subTone = 'muted' }) => (
   <div className="bg-white rounded-xl p-3 shadow-sm border border-slate-200">
     <div className="flex items-center gap-2 text-slate-500 text-xs mb-1">{icon} {title}</div>
     <div className="text-2xl font-bold text-slate-800">{value}</div>
-    {sub && <div className="text-xs text-slate-400 mt-1">{sub}</div>}
+    {sub && <div className={`text-xs mt-1 ${kpiSubToneClass[subTone] || kpiSubToneClass.muted}`}>{sub}</div>}
   </div>
 );
 
@@ -884,6 +891,18 @@ export default function App() {
     };
   }, [filtered]);
 
+  const hasAdsData = adsSummary.rows > 0 || adsSummary.spend > 0;
+  const adsPno = kpis.revenue ? (adsSummary.spend / kpis.revenue) * 100 : 0;
+  const adsPnoSub = adsSummary.loading
+    ? 'PNO: načítám Ads'
+    : adsSummary.error
+      ? 'PNO: Ads nedostupné'
+      : !hasAdsData
+        ? 'PNO: bez Ads spendu'
+        : kpis.revenue
+          ? `PNO ${formatPercent(adsPno)} · Ads ${formatCurrency(adsSummary.spend)}`
+          : `PNO: bez tržeb · Ads ${formatCurrency(adsSummary.spend)}`;
+
   const heatmap = useMemo(() => {
     const d = {};
     for (let day = 0; day < 7; day++) { 
@@ -1423,7 +1442,7 @@ export default function App() {
         {/* KPIs */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           <KPICard title="Objednávky" value={formatNumber(kpis.orders)} icon="🛒" />
-          <KPICard title="Obrat (bez DPH)" value={formatCurrency(kpis.revenue)} icon="💰" />
+          <KPICard title="Obrat (bez DPH)" value={formatCurrency(kpis.revenue)} icon="💰" sub={adsPnoSub} subTone={hasAdsData ? 'red' : 'muted'} />
           <KPICard title="Ø Objednávka" value={formatCurrency(kpis.aov)} icon="📦" />
           <KPICard title="B2B podíl" value={`${kpis.b2bPct.toFixed(0)}%`} icon="🏢" sub={`🏙️ Velká města: ${kpis.bigPct.toFixed(0)}%`} />
         </div>

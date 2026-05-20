@@ -808,6 +808,62 @@ function percentagePointMetric({ label, current, previous }) {
   };
 }
 
+function compareMarketRows(currentMarkets, previousMarkets, currentTotal, previousTotal) {
+  const previousMarketMap = new Map(previousMarkets.map((row) => [row.key, row]));
+  return currentMarkets
+    .map((row) => {
+      const previous = previousMarketMap.get(row.key);
+      const currentShare = currentTotal.spend ? (row.spend / currentTotal.spend) * 100 : 0;
+      const previousShare = previousTotal.spend ? (toNumber(previous?.spend) / previousTotal.spend) * 100 : 0;
+      return {
+        key: row.key,
+        label: `${providerLabel(row.provider)} / ${marketLabel(row.market)}`,
+        currentSpend: row.spend,
+        previousSpend: toNumber(previous?.spend),
+        spendDelta: row.spend - toNumber(previous?.spend),
+        spendChange: relativeChange(row.spend, previous?.spend),
+        currentAov: row.aov,
+        previousAov: toNumber(previous?.aov),
+        aovChange: relativeChange(row.aov, previous?.aov),
+        currentRoas: row.roas,
+        previousRoas: toNumber(previous?.roas),
+        roasChange: relativeChange(row.roas, previous?.roas),
+        currentShare,
+        previousShare,
+        shareDelta: currentShare - previousShare,
+      };
+    })
+    .filter((row) => row.currentSpend > 0 || row.previousSpend > 0)
+    .sort((a, b) => Math.abs(b.spendDelta) - Math.abs(a.spendDelta))
+    .slice(0, 6);
+}
+
+function compareCampaignRows(currentCampaigns, previousCampaigns) {
+  const previousCampaignMap = new Map(previousCampaigns.map((row) => [row.key, row]));
+  return currentCampaigns
+    .map((row) => {
+      const previous = previousCampaignMap.get(row.key);
+      return {
+        key: row.key,
+        label: row.campaignName,
+        subLabel: `${providerLabel(row.provider)} / ${marketLabel(row.market)}`,
+        currentSpend: row.spend,
+        previousSpend: toNumber(previous?.spend),
+        spendDelta: row.spend - toNumber(previous?.spend),
+        spendChange: relativeChange(row.spend, previous?.spend),
+        currentAov: row.aov,
+        previousAov: toNumber(previous?.aov),
+        aovChange: relativeChange(row.aov, previous?.aov),
+        currentRoas: row.roas,
+        previousRoas: toNumber(previous?.roas),
+        roasChange: relativeChange(row.roas, previous?.roas),
+      };
+    })
+    .filter((row) => row.currentSpend > 0 || row.previousSpend > 0)
+    .sort((a, b) => Math.abs(b.spendDelta) - Math.abs(a.spendDelta))
+    .slice(0, 8);
+}
+
 function buildPeriodComparison({
   currentRange,
   previousRange,
@@ -837,6 +893,8 @@ function buildPeriodComparison({
       percentagePointMetric({ label: 'Hrubý zisk %', current: currentOrderTrend.grossProfitPct, previous: previousOrderTrend.grossProfitPct }),
     );
   }
+  const marketMovers = compareMarketRows(currentMarkets, previousMarkets, currentTotal, previousTotal);
+  const campaignMovers = compareCampaignRows(currentCampaigns, previousCampaigns);
   const signals = [];
 
   if (!previousRange || !previousHasData) {
@@ -845,6 +903,8 @@ function buildPeriodComparison({
       previousRange,
       previousHasData,
       summary,
+      marketMovers: [],
+      campaignMovers: [],
       signals: [
         insight({
           severity: 'info',
@@ -935,53 +995,35 @@ function buildPeriodComparison({
     }));
   }
 
-  const previousMarketMap = new Map(previousMarkets.map((row) => [row.key, row]));
-  const marketShift = currentMarkets
-    .map((row) => {
-      const previous = previousMarketMap.get(row.key);
-      const currentShare = currentTotal.spend ? (row.spend / currentTotal.spend) * 100 : 0;
-      const previousShare = previousTotal.spend ? (toNumber(previous?.spend) / previousTotal.spend) * 100 : 0;
-      return { row, previous, currentShare, previousShare, shareDelta: currentShare - previousShare };
-    })
-    .filter((item) => item.row.spend >= Math.max(currentTotal.spend * 0.08, 500))
+  const marketShift = marketMovers
+    .filter((item) => item.currentSpend >= Math.max(currentTotal.spend * 0.08, 500))
     .sort((a, b) => b.shareDelta - a.shareDelta)[0];
 
   if (marketShift && marketShift.shareDelta > 8) {
     signals.push(insight({
       severity: 'info',
-      title: `Spend mix se přesunul do ${marketLabel(marketShift.row.market)}`,
+      title: `Spend mix se přesunul do ${marketShift.label}`,
       finding: 'Jedna země má výrazně vyšší podíl na spendu než v předchozím období.',
-      evidence: `${providerLabel(marketShift.row.provider)} / ${marketLabel(marketShift.row.market)}: podíl spendu ${formatPercent(marketShift.previousShare)} → ${formatPercent(marketShift.currentShare)} (${formatSignedPercentagePoints(marketShift.shareDelta)}), spend ${formatCurrency(marketShift.row.spend)}.`,
+      evidence: `${marketShift.label}: podíl spendu ${formatPercent(marketShift.previousShare)} → ${formatPercent(marketShift.currentShare)} (${formatSignedPercentagePoints(marketShift.shareDelta)}), spend ${formatCurrency(marketShift.currentSpend)}.`,
       recommendation: 'Porovnat AOV a ROAS této země proti zbytku. Pokud má nižší hodnotu objednávky, může vysvětlovat pokles průměrné objednávky bez nutnosti změny cílení.',
       confidence: 'střední',
     }));
   }
 
-  const previousCampaignMap = new Map(previousCampaigns.map((row) => [row.key, row]));
-  const campaignMover = currentCampaigns
-    .map((row) => {
-      const previous = previousCampaignMap.get(row.key);
-      return {
-        row,
-        previous,
-        spendDelta: row.spend - toNumber(previous?.spend),
-        spendChange: relativeChange(row.spend, previous?.spend),
-        aovChange: relativeChange(row.aov, previous?.aov),
-      };
-    })
-    .filter((item) => item.row.spend >= Math.max(currentTotal.spend * 0.08, 500) && item.spendDelta > 0)
+  const campaignMover = campaignMovers
+    .filter((item) => item.currentSpend >= Math.max(currentTotal.spend * 0.08, 500) && item.spendDelta > 0)
     .sort((a, b) => b.spendDelta - a.spendDelta)[0];
 
   if (campaignMover) {
-    const previousAov = toNumber(campaignMover.previous?.aov);
-    const lowAovNow = currentTotal.aov > 0 && campaignMover.row.aov > 0 && campaignMover.row.aov < currentTotal.aov * 0.75;
+    const previousAov = campaignMover.previousAov;
+    const lowAovNow = currentTotal.aov > 0 && campaignMover.currentAov > 0 && campaignMover.currentAov < currentTotal.aov * 0.75;
     const aovFell = campaignMover.aovChange !== null && campaignMover.aovChange < -15;
     if (lowAovNow || aovFell) {
       signals.push(insight({
         severity: 'warning',
         title: 'Kampaň s rostoucím spendem a slabším AOV',
         finding: 'Jedna kampaň dostala proti předchozímu období více rozpočtu a zároveň má nízkou nebo klesající průměrnou hodnotu konverze.',
-        evidence: `${campaignMover.row.campaignName}: spend ${formatCurrency(toNumber(campaignMover.previous?.spend))} → ${formatCurrency(campaignMover.row.spend)} (${formatRelativeChange(campaignMover.row.spend, campaignMover.previous?.spend)}), AOV ${previousAov ? formatCurrency(previousAov) : 'bez předchozí hodnoty'} → ${formatCurrency(campaignMover.row.aov)}.`,
+        evidence: `${campaignMover.label}: spend ${formatCurrency(campaignMover.previousSpend)} → ${formatCurrency(campaignMover.currentSpend)} (${formatRelativeChange(campaignMover.currentSpend, campaignMover.previousSpend)}), AOV ${previousAov ? formatCurrency(previousAov) : 'bez předchozí hodnoty'} → ${formatCurrency(campaignMover.currentAov)}.`,
         recommendation: 'Tohle je první kandidát na kontrolu search terms a produktového mixu. Pokud nosí levnější položky, oddělit cíle/rozpočet od kampaní, které nosí vysokou hodnotu objednávky.',
         confidence: 'střední',
       }));
@@ -999,7 +1041,7 @@ function buildPeriodComparison({
     }));
   }
 
-  return { currentRange, previousRange, previousHasData, summary, signals: signals.slice(0, 4) };
+  return { currentRange, previousRange, previousHasData, summary, marketMovers, campaignMovers, signals: signals.slice(0, 4) };
 }
 
 function buildPpcInsights({
@@ -1478,6 +1520,67 @@ function InsightCard({ item }) {
   );
 }
 
+function OwnerPpcBrief({ insights, businessTotal, total, orderTotal }) {
+  const priorityInsights = insights.slice(0, 3);
+  const topSeverity = priorityInsights[0]?.severity;
+  const verdict = topSeverity === 'critical'
+    ? 'Nejdřív brzdit riziko: některá část spendu pravděpodobně ujídá hrubý zisk.'
+    : topSeverity === 'warning'
+      ? 'Nejdřív najít příčinu: data ukazují místo, kde se zhoršuje efektivita nebo mix objednávek.'
+      : businessTotal.grossProfitAfterAds > 0 && total.spend > 0
+        ? 'Základ vypadá zdravě: další krok je hledat bezpečné škálování a hlídat mix hodnoty objednávek.'
+        : 'Potřebuji víc reklamních nebo maržových dat, abych dal spolehlivý PPC verdikt.';
+
+  return (
+    <div>
+      <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-800">AI PPC specialista</h3>
+          <div className="mt-1 text-sm text-slate-600">{verdict}</div>
+        </div>
+        <div className="text-xs text-slate-500">
+          {formatNumber(orderTotal.exactOrders)} přesných obj. · {formatCurrency(total.spend)} spend
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-4">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="text-xs font-medium text-slate-500">PNO</div>
+          <div className="mt-1 text-lg font-bold text-slate-800">{formatPercent(businessTotal.pno)}</div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="text-xs font-medium text-slate-500">Real ROAS</div>
+          <div className="mt-1 text-lg font-bold text-blue-700">{formatRatio(businessTotal.realRoas)}</div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="text-xs font-medium text-slate-500">Zisk po Ads</div>
+          <div className={`mt-1 text-lg font-bold ${businessTotal.grossProfitAfterAds >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+            {formatCurrency(businessTotal.grossProfitAfterAds)}
+          </div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="text-xs font-medium text-slate-500">Ads vs zisk</div>
+          <div className="mt-1 text-lg font-bold text-slate-800">{formatPercent(businessTotal.spendToGrossProfit)}</div>
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-2">
+        {priorityInsights.map((item, index) => (
+          <div key={`${item.title}:${index}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+            <div className="font-semibold text-slate-800">{index + 1}. {item.title}</div>
+            <div className="mt-1 text-slate-600">{item.recommendation}</div>
+          </div>
+        ))}
+        {!priorityInsights.length && (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+            Zatím není dost dat pro prioritní doporučení.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TrendValue({ row }) {
   const change = row.changePct;
   const tone = change === null
@@ -1498,6 +1601,78 @@ function TrendValue({ row }) {
   );
 }
 
+function changeTone(value) {
+  return toNumber(value) > 0
+    ? 'text-emerald-700'
+    : toNumber(value) < 0
+      ? 'text-red-700'
+      : 'text-slate-500';
+}
+
+function formatOptionalRatio(value) {
+  return toNumber(value) ? formatRatio(value) : '—';
+}
+
+function MovementTable({ title, rows, showShare = false }) {
+  if (!rows?.length) return null;
+
+  return (
+    <div>
+      <h4 className="mb-2 text-sm font-semibold text-slate-800">{title}</h4>
+      <div className="overflow-x-auto rounded-lg border border-slate-200">
+        <table className="w-full min-w-[760px] text-sm">
+          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-3 py-2 text-left">Segment</th>
+              <th className="px-3 py-2 text-right">Spend</th>
+              <th className="px-3 py-2 text-right">Δ spend</th>
+              <th className="px-3 py-2 text-right">AOV</th>
+              <th className="px-3 py-2 text-right">ROAS</th>
+              {showShare && <th className="px-3 py-2 text-right">Podíl spendu</th>}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map((row) => (
+              <tr key={row.key} className="hover:bg-slate-50">
+                <td className="px-3 py-2">
+                  <div className="font-semibold text-slate-800">{row.label}</div>
+                  {row.subLabel && <div className="text-xs text-slate-400">{row.subLabel}</div>}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <div className="font-semibold text-slate-800">{formatCurrency(row.currentSpend)}</div>
+                  <div className="text-xs text-slate-400">předtím {formatCurrency(row.previousSpend)}</div>
+                </td>
+                <td className={`px-3 py-2 text-right font-semibold ${changeTone(row.spendDelta)}`}>
+                  <div>{formatCurrency(row.spendDelta)}</div>
+                  <div className="text-xs">{row.spendChange === null ? 'bez srovnání' : formatSignedPercent(row.spendChange)}</div>
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <div className="font-semibold text-slate-800">{formatCurrency(row.currentAov)}</div>
+                  <div className={`text-xs ${row.aovChange === null ? 'text-slate-400' : changeTone(row.aovChange)}`}>
+                    {row.aovChange === null ? `předtím ${formatCurrency(row.previousAov)}` : formatSignedPercent(row.aovChange)}
+                  </div>
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <div className="font-semibold text-slate-800">{formatOptionalRatio(row.currentRoas)}</div>
+                  <div className={`text-xs ${row.roasChange === null ? 'text-slate-400' : changeTone(row.roasChange)}`}>
+                    {row.roasChange === null ? `předtím ${formatOptionalRatio(row.previousRoas)}` : formatSignedPercent(row.roasChange)}
+                  </div>
+                </td>
+                {showShare && (
+                  <td className="px-3 py-2 text-right">
+                    <div className="font-semibold text-slate-800">{formatPercent(row.currentShare)}</div>
+                    <div className={`text-xs ${changeTone(row.shareDelta)}`}>{formatSignedPercentagePoints(row.shareDelta)}</div>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function PeriodComparisonPanel({ comparison }) {
   if (!comparison) return null;
   const rangeLabel = comparison.previousRange
@@ -1513,7 +1688,7 @@ function PeriodComparisonPanel({ comparison }) {
         </div>
         <StatusBadge value={comparison.previousHasData ? 'trend OK' : 'bez trendu'} />
       </div>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
         {comparison.summary.map((row) => (
           <TrendValue key={row.label} row={row} />
         ))}
@@ -1523,6 +1698,12 @@ function PeriodComparisonPanel({ comparison }) {
           <InsightCard key={`${item.title}:${index}`} item={item} />
         ))}
       </div>
+      {comparison.previousHasData && (
+        <div className="mt-4 grid gap-4">
+          <MovementTable title="Největší změny podle zemí" rows={comparison.marketMovers} showShare />
+          <MovementTable title="Největší změny podle kampaní" rows={comparison.campaignMovers} />
+        </div>
+      )}
     </div>
   );
 }
@@ -2195,6 +2376,24 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
     periodComparison,
   ]);
   const latestRun = syncRuns[0];
+  const detailSections = [
+    { key: 'ad_group', title: LEVEL_LABELS.ad_group, rows: topAdGroups },
+    { key: 'device', title: LEVEL_LABELS.device, rows: topDevices },
+    { key: 'ad', title: LEVEL_LABELS.ad, rows: topAds },
+    { key: 'keyword', title: LEVEL_LABELS.keyword, rows: topKeywords },
+    { key: 'search_term', title: LEVEL_LABELS.search_term, rows: topSearchTerms },
+    { key: 'shopping_product', title: LEVEL_LABELS.shopping_product, rows: topProducts },
+    { key: 'asset_group', title: LEVEL_LABELS.asset_group, rows: topAssetGroups },
+    { key: 'hour', title: LEVEL_LABELS.hour, rows: topHours },
+    { key: 'conversion_action', title: LEVEL_LABELS.conversion_action, rows: topConversionActions },
+    { key: 'audience', title: LEVEL_LABELS.audience, rows: topAudiences },
+    { key: 'geo', title: LEVEL_LABELS.geo, rows: topGeo },
+    { key: 'placement', title: LEVEL_LABELS.placement, rows: topPlacements },
+  ];
+  const visibleDetailSections = detailSections.filter((section) => section.rows.length);
+  const emptyDetailLabels = detailSections
+    .filter((section) => !section.rows.length)
+    .map((section) => section.title);
 
   if (loading) {
     return <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">Načítám Ads data…</div>;
@@ -2249,6 +2448,13 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
       />
 
       <PeriodComparisonPanel comparison={periodComparison} />
+
+      <OwnerPpcBrief
+        insights={ppcInsights}
+        businessTotal={businessTotal}
+        total={total}
+        orderTotal={orderTotal}
+      />
 
       <div>
         <div className="mb-3 flex items-center justify-between gap-3">
@@ -2341,19 +2547,26 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
         <CampaignTable rows={campaigns} />
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-3">
-        <DetailTable title={LEVEL_LABELS.ad_group} rows={topAdGroups} />
-        <DetailTable title={LEVEL_LABELS.device} rows={topDevices} />
-        <DetailTable title={LEVEL_LABELS.ad} rows={topAds} />
-        <DetailTable title={LEVEL_LABELS.keyword} rows={topKeywords} />
-        <DetailTable title={LEVEL_LABELS.search_term} rows={topSearchTerms} />
-        <DetailTable title={LEVEL_LABELS.shopping_product} rows={topProducts} />
-        <DetailTable title={LEVEL_LABELS.asset_group} rows={topAssetGroups} />
-        <DetailTable title={LEVEL_LABELS.hour} rows={topHours} />
-        <DetailTable title={LEVEL_LABELS.conversion_action} rows={topConversionActions} />
-        <DetailTable title={LEVEL_LABELS.audience} rows={topAudiences} />
-        <DetailTable title={LEVEL_LABELS.geo} rows={topGeo} />
-        <DetailTable title={LEVEL_LABELS.placement} rows={topPlacements} />
+      <div>
+        <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <h3 className="text-sm font-semibold text-slate-800">Detailní vrstvy kampaní</h3>
+          <div className="text-xs text-slate-500">Top položky podle spendu ve zvoleném období</div>
+        </div>
+        <div className="grid gap-5">
+          {visibleDetailSections.map((section) => (
+            <DetailTable key={section.key} title={section.title} rows={section.rows} />
+          ))}
+          {!visibleDetailSections.length && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+              Pro zvolený filtr zatím nejsou detailní Ads vrstvy.
+            </div>
+          )}
+        </div>
+        {!!emptyDetailLabels.length && (
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
+            Bez dat ve filtru: {emptyDetailLabels.join(', ')}
+          </div>
+        )}
       </div>
 
       {!!syncRuns.length && (
