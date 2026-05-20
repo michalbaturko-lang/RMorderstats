@@ -623,6 +623,7 @@ function buildPpcInsights({
   campaigns,
   topSearchTerms,
   topProducts,
+  topDevices,
   topKeywords,
   topAssetGroups,
   topHours,
@@ -636,6 +637,9 @@ function buildPpcInsights({
   const minSpend = Math.max(total.spend * 0.03, 250);
   const meaningfulCampaignSpend = Math.max(total.spend * 0.08, 500);
   const highSpend = Math.max(total.spend * 0.12, 800);
+  const realAov = orderTotal.orders ? businessTotal.realRevenue / orderTotal.orders : 0;
+  const referenceAov = realAov || total.aov;
+  const lowAovThreshold = referenceAov ? referenceAov * 0.7 : 0;
 
   if (total.spend <= 0) {
     return [
@@ -784,6 +788,26 @@ function buildPpcInsights({
     }));
   }
 
+  const lowAovCampaign = campaigns
+    .filter((row) => (
+      referenceAov > 0 &&
+      row.spend >= meaningfulCampaignSpend &&
+      row.conversions >= 2 &&
+      row.aov > 0 &&
+      row.aov < lowAovThreshold
+    ))
+    .sort((a, b) => b.spend - a.spend || a.aov - b.aov)[0];
+  if (lowAovCampaign) {
+    insights.push(insight({
+      severity: 'warning',
+      title: 'Kampaň nosí nízkou hodnotu objednávky',
+      finding: 'Jedna z významně utrácejících kampaní má platformní AOV výrazně pod reálným průměrem objednávek ve filtru.',
+      evidence: `${lowAovCampaign.campaignName}: AOV ${formatCurrency(lowAovCampaign.aov)}, spend ${formatCurrency(lowAovCampaign.spend)}, konverze ${formatNumber(lowAovCampaign.conversions)}; referenční AOV ${formatCurrency(referenceAov)}.`,
+      recommendation: 'Rozpadnout kampaň podle produktů, search terms a zařízení. Pokud nese hlavně levné položky, oddělit ji do samostatného rozpočtu nebo upravit produktový/bidding mix.',
+      confidence: 'střední',
+    }));
+  }
+
   const bestCampaign = campaigns
     .filter((row) => row.spend >= meaningfulCampaignSpend && row.roas >= Math.max(total.roas, 1))
     .sort((a, b) => b.conversionValue - a.conversionValue)[0];
@@ -812,6 +836,26 @@ function buildPpcInsights({
     }));
   }
 
+  const lowAovSearchTerm = topSearchTerms
+    .filter((row) => (
+      referenceAov > 0 &&
+      row.spend >= minSpend &&
+      row.conversions > 0 &&
+      row.aov > 0 &&
+      row.aov < lowAovThreshold
+    ))
+    .sort((a, b) => b.spend - a.spend || a.aov - b.aov)[0];
+  if (lowAovSearchTerm) {
+    insights.push(insight({
+      severity: 'warning',
+      title: 'Search term nosí levné objednávky',
+      finding: 'Dotaz konvertuje, ale průměrná hodnota konverze je výrazně pod průměrem období.',
+      evidence: `"${lowAovSearchTerm.label}": AOV ${formatCurrency(lowAovSearchTerm.aov)}, spend ${formatCurrency(lowAovSearchTerm.spend)}, konverze ${formatNumber(lowAovSearchTerm.conversions)}; reference ${formatCurrency(referenceAov)}.`,
+      recommendation: 'Prověřit, jestli dotaz nevede na levný sortiment nebo nevytlačuje hodnotnější query. Podle intentu ho oddělit, zlevnit bidding, nebo doplnit negativy.',
+      confidence: 'střední',
+    }));
+  }
+
   const weakProduct = topProducts
     .filter((row) => row.spend >= minSpend && row.roas < 1.2)
     .sort((a, b) => b.spend - a.spend)[0];
@@ -823,6 +867,46 @@ function buildPpcInsights({
       evidence: `${weakProduct.label}: spend ${formatCurrency(weakProduct.spend)}, ROAS ${formatRatio(weakProduct.roas)}, konverze ${formatNumber(weakProduct.conversions)}.`,
       recommendation: 'Zkontrolovat cenu po zlevnění, nákupku, feed title a produktovou konkurenceschopnost. Produkt může být zdrojem nízkého AOV.',
       confidence: 'střední',
+    }));
+  }
+
+  const lowAovProduct = topProducts
+    .filter((row) => (
+      referenceAov > 0 &&
+      row.spend >= minSpend &&
+      row.conversions > 0 &&
+      row.aov > 0 &&
+      row.aov < lowAovThreshold
+    ))
+    .sort((a, b) => b.spend - a.spend || a.aov - b.aov)[0];
+  if (lowAovProduct) {
+    insights.push(insight({
+      severity: 'warning',
+      title: 'Produkt táhne AOV dolů',
+      finding: 'Produkt z feedu přináší konverze, ale s výrazně nižší hodnotou než průměr období.',
+      evidence: `${lowAovProduct.label}: AOV ${formatCurrency(lowAovProduct.aov)}, spend ${formatCurrency(lowAovProduct.spend)}, ROAS ${formatRatio(lowAovProduct.roas)}, konverze ${formatNumber(lowAovProduct.conversions)}.`,
+      recommendation: 'Porovnat cenu po slevách, nákupku a bundlování. Pokud produkt vydělává, držet ho odděleně; pokud jen zvyšuje objem levných objednávek, omezit jeho reklamní tlak.',
+      confidence: 'střední',
+    }));
+  }
+
+  const lowAovDevice = topDevices
+    .filter((row) => (
+      referenceAov > 0 &&
+      row.spend >= minSpend &&
+      row.conversions > 0 &&
+      row.aov > 0 &&
+      row.aov < lowAovThreshold
+    ))
+    .sort((a, b) => b.spend - a.spend || a.aov - b.aov)[0];
+  if (lowAovDevice) {
+    insights.push(insight({
+      severity: 'info',
+      title: 'Zařízení s nízkým AOV',
+      finding: 'Jedno zařízení má znatelně nižší platformní hodnotu objednávky než průměr období.',
+      evidence: `${lowAovDevice.label}: AOV ${formatCurrency(lowAovDevice.aov)}, spend ${formatCurrency(lowAovDevice.spend)}, ROAS ${formatRatio(lowAovDevice.roas)}, konverze ${formatNumber(lowAovDevice.conversions)}.`,
+      recommendation: 'Nedělat okamžitou bid úpravu podle jedné periody; nejdřív porovnat device mix po zemích a kampaních. Pokud se vzor opakuje, řešit oddělené vyhodnocení mobil/desktop.',
+      confidence: 'nižší',
     }));
   }
 
@@ -1220,6 +1304,7 @@ function DetailTable({ title, rows }) {
                 <th className="px-3 py-2 text-right">Spend</th>
                 <th className="px-3 py-2 text-right">Kliky</th>
                 <th className="px-3 py-2 text-right">Konv.</th>
+                <th className="px-3 py-2 text-right">AOV</th>
                 <th className="px-3 py-2 text-right">ROAS</th>
               </tr>
             </thead>
@@ -1234,6 +1319,7 @@ function DetailTable({ title, rows }) {
                   <td className="px-3 py-2 text-right font-semibold text-red-700">{formatCurrency(row.spend)}</td>
                   <td className="px-3 py-2 text-right text-slate-700">{formatNumber(row.clicks)}</td>
                   <td className="px-3 py-2 text-right text-slate-700">{formatNumber(row.conversions)}</td>
+                  <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(row.aov)}</td>
                   <td className="px-3 py-2 text-right font-bold text-slate-800">{formatRatio(row.roas)}</td>
                 </tr>
               ))}
@@ -1460,6 +1546,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
     campaigns,
     topSearchTerms,
     topProducts,
+    topDevices,
     topKeywords,
     topAssetGroups,
     topHours,
@@ -1476,6 +1563,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
     campaigns,
     topSearchTerms,
     topProducts,
+    topDevices,
     topKeywords,
     topAssetGroups,
     topHours,
