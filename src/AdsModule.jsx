@@ -213,6 +213,66 @@ function addOrderMetrics(target, order) {
   }
 }
 
+function deduplicateOrders(orders) {
+  const seen = new Set();
+  return orders.filter((order) => {
+    const key = order.raw_data?.order_number || order.id;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function filterCancelledOrders(orders) {
+  return orders.filter((order) => {
+    const topStatus = String(order.status || '').toUpperCase();
+    const rawStatus = String(order.raw_data?.status || '').toUpperCase();
+    return topStatus !== 'STORNO' && rawStatus !== 'STORNO';
+  });
+}
+
+function cleanOrders(orders, country = 'all') {
+  const clean = filterCancelledOrders(deduplicateOrders(Array.isArray(orders) ? orders : []));
+  return country && country !== 'all'
+    ? clean.filter((order) => getOrderMarket(order) === country)
+    : clean;
+}
+
+function localTimezoneSuffix() {
+  const offset = -new Date().getTimezoneOffset();
+  const sign = offset >= 0 ? '+' : '-';
+  const hours = String(Math.floor(Math.abs(offset) / 60)).padStart(2, '0');
+  const minutes = String(Math.abs(offset) % 60).padStart(2, '0');
+  return `${sign}${hours}:${minutes}`;
+}
+
+async function fetchOrdersForRange(supabaseClient, range, country = 'all') {
+  const rows = [];
+  const pageSize = 1000;
+  const tz = localTimezoneSuffix();
+
+  for (let from = 0; ; from += pageSize) {
+    let query = supabaseClient
+      .from('orders')
+      .select('*')
+      .gte('order_date', `${range.from}T00:00:00${tz}`)
+      .lte('order_date', `${range.to}T23:59:59${tz}`)
+      .order('order_date', { ascending: false })
+      .range(from, from + pageSize - 1);
+
+    if (country && country !== 'all') query = query.eq('market', country);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const chunk = Array.isArray(data) ? data : [];
+    rows.push(...chunk);
+    if (chunk.length < pageSize) break;
+  }
+
+  return cleanOrders(rows, country);
+}
+
 function aggregateOrders(orders) {
   return orders.reduce((acc, order) => {
     addOrderMetrics(acc, order);
@@ -715,24 +775,68 @@ function insight({ severity = 'info', title, finding, evidence, recommendation, 
 }
 
 function comparisonMetric({ label, current, previous, formatter = formatNumber }) {
+  const changePct = relativeChange(current, previous);
   return {
     label,
     current,
     previous,
-    changePct: relativeChange(current, previous),
+    changePct,
+    changeLabel: changePct === null ? null : formatSignedPercent(changePct),
     currentLabel: formatter(current),
     previousLabel: formatter(previous),
   };
 }
 
-function buildPeriodComparison({ currentRange, previousRange, currentTotal, previousTotal, currentMarkets, previousMarkets, currentCampaigns, previousCampaigns }) {
+function orderTrendMetrics(orderTotal) {
+  return {
+    realAov: orderTotal.orders ? orderTotal.revenue / orderTotal.orders : 0,
+    grossProfitPct: orderTotal.exactRevenue ? (orderTotal.exactGrossProfit / orderTotal.exactRevenue) * 100 : 0,
+    exactShare: orderTotal.orders ? (orderTotal.exactOrders / orderTotal.orders) * 100 : 0,
+  };
+}
+
+function percentagePointMetric({ label, current, previous }) {
+  const change = toNumber(current) - toNumber(previous);
+  return {
+    label,
+    current,
+    previous,
+    changePct: change,
+    changeLabel: formatSignedPercentagePoints(change),
+    currentLabel: formatPercent(current),
+    previousLabel: formatPercent(previous),
+  };
+}
+
+function buildPeriodComparison({
+  currentRange,
+  previousRange,
+  currentTotal,
+  previousTotal,
+  currentMarkets,
+  previousMarkets,
+  currentCampaigns,
+  previousCampaigns,
+  currentOrderTotal,
+  previousOrderTotal,
+  previousOrderState,
+}) {
   const previousHasData = previousTotal.spend > 0 || previousTotal.conversionValue > 0 || previousTotal.clicks > 0;
+  const currentOrderTrend = orderTrendMetrics(currentOrderTotal);
+  const previousOrderTrend = orderTrendMetrics(previousOrderTotal);
+  const previousOrdersLoaded = previousOrderState?.status === 'loaded' && previousOrderTotal.orders > 0;
   const summary = [
     comparisonMetric({ label: 'Spend', current: currentTotal.spend, previous: previousTotal.spend, formatter: formatCurrency }),
     comparisonMetric({ label: 'Konv. hodnota', current: currentTotal.conversionValue, previous: previousTotal.conversionValue, formatter: formatCurrency }),
     comparisonMetric({ label: 'Platform AOV', current: currentTotal.aov, previous: previousTotal.aov, formatter: formatCurrency }),
     comparisonMetric({ label: 'ROAS', current: currentTotal.roas, previous: previousTotal.roas, formatter: formatRatio }),
   ];
+  if (previousOrdersLoaded) {
+    summary.push(
+      comparisonMetric({ label: 'Real AOV', current: currentOrderTrend.realAov, previous: previousOrderTrend.realAov, formatter: formatCurrency }),
+      percentagePointMetric({ label: 'Hrubý zisk %', current: currentOrderTrend.grossProfitPct, previous: previousOrderTrend.grossProfitPct }),
+    );
+  }
   const signals = [];
 
   if (!previousRange || !previousHasData) {
@@ -756,6 +860,17 @@ function buildPeriodComparison({ currentRange, previousRange, currentTotal, prev
     };
   }
 
+  if (previousOrderState?.status === 'error') {
+    signals.push(insight({
+      severity: 'info',
+      title: 'Real trend objednávek se nepodařilo načíst',
+      finding: 'Platformní Ads trend funguje, ale předchozí objednávky pro real AOV a hrubý zisk nejsou dostupné.',
+      evidence: previousOrderState.message || 'Předchozí objednávky se nepodařilo načíst přes Supabase.',
+      recommendation: 'Pro trend reálného AOV a marže použít aktuální období až po obnovení čtení objednávek nebo po aplikaci business views.',
+      confidence: 'střední',
+    }));
+  }
+
   const spendChange = relativeChange(currentTotal.spend, previousTotal.spend);
   const valueChange = relativeChange(currentTotal.conversionValue, previousTotal.conversionValue);
   const aovChange = relativeChange(currentTotal.aov, previousTotal.aov);
@@ -769,6 +884,32 @@ function buildPeriodComparison({ currentRange, previousRange, currentTotal, prev
       evidence: `AOV ${formatCurrency(previousTotal.aov)} → ${formatCurrency(currentTotal.aov)} (${formatSignedPercent(aovChange)}), konverze ${formatNumber(previousTotal.conversions)} → ${formatNumber(currentTotal.conversions)}.`,
       recommendation: 'Hledat posun v kampaních, search terms, produktech a zemích, které začaly nosit levnější objednávky.',
       confidence: 'střední',
+    }));
+  }
+
+  const realAovChange = previousOrdersLoaded ? relativeChange(currentOrderTrend.realAov, previousOrderTrend.realAov) : null;
+  if (realAovChange !== null && realAovChange < -12 && currentOrderTotal.orders >= 5) {
+    signals.push(insight({
+      severity: 'warning',
+      title: 'Real AOV objednávek proti předchozímu období klesá',
+      finding: 'Reálná hodnota objednávek bez DPH a bez poštovného je nižší než ve stejně dlouhém předchozím období.',
+      evidence: `Real AOV ${formatCurrency(previousOrderTrend.realAov)} → ${formatCurrency(currentOrderTrend.realAov)} (${formatSignedPercent(realAovChange)}), objednávky ${formatNumber(previousOrderTotal.orders)} → ${formatNumber(currentOrderTotal.orders)}.`,
+      recommendation: 'Porovnat tento signál s Ads AOV a mixem zemí/kampaní. Pokud klesá real AOV i platform AOV, problém je pravděpodobně v produktovém nebo kampanovém mixu, ne jen v atribuci.',
+      confidence: 'vysoká',
+    }));
+  }
+
+  const grossProfitPctDelta = previousOrdersLoaded
+    ? currentOrderTrend.grossProfitPct - previousOrderTrend.grossProfitPct
+    : null;
+  if (grossProfitPctDelta !== null && grossProfitPctDelta < -2 && currentOrderTrend.exactShare >= 70) {
+    signals.push(insight({
+      severity: 'warning',
+      title: 'Hrubý zisk % proti předchozímu období klesá',
+      finding: 'Přesné objednávky mají nižší hrubý zisk v procentech než ve stejně dlouhém předchozím období.',
+      evidence: `Hrubý zisk % ${formatPercent(previousOrderTrend.grossProfitPct)} → ${formatPercent(currentOrderTrend.grossProfitPct)} (${formatSignedPercentagePoints(grossProfitPctDelta)}), přesnost nákupky ${formatPercent(currentOrderTrend.exactShare)}.`,
+      recommendation: 'Zkontrolovat, zda Ads netlačí více nízkomaržových produktů. Prioritně porovnat top shopping produkty a kampaně s rostoucím spendem.',
+      confidence: 'vysoká',
     }));
   }
 
@@ -1351,7 +1492,7 @@ function TrendValue({ row }) {
     <div className="rounded-lg border border-slate-200 bg-white p-3">
       <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{row.label}</div>
       <div className="mt-1 text-xl font-bold text-slate-800">{row.currentLabel}</div>
-      <div className={`mt-1 text-xs font-semibold ${tone}`}>{change === null ? 'bez předchozí hodnoty' : formatSignedPercent(change)}</div>
+      <div className={`mt-1 text-xs font-semibold ${tone}`}>{change === null ? 'bez předchozí hodnoty' : (row.changeLabel || formatSignedPercent(change))}</div>
       <div className="text-xs text-slate-400">předtím {row.previousLabel}</div>
     </div>
   );
@@ -1732,6 +1873,8 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
   const [dailyRows, setDailyRows] = useState([]);
   const [campaignRows, setCampaignRows] = useState([]);
   const [previousCampaignRows, setPreviousCampaignRows] = useState([]);
+  const [previousOrders, setPreviousOrders] = useState([]);
+  const [previousOrderState, setPreviousOrderState] = useState({ status: 'idle', message: '' });
   const [campaignMetaRows, setCampaignMetaRows] = useState([]);
   const [detailRows, setDetailRows] = useState([]);
   const [detailCounts, setDetailCounts] = useState({ byLevel: {}, byProvider: {} });
@@ -1783,6 +1926,11 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
               .order('date', { ascending: true })
               .range(0, 9999)
           )
+        : Promise.resolve({ data: [], error: null });
+      const previousOrdersPromise = previousRange
+        ? fetchOrdersForRange(supabaseClient, previousRange, country)
+            .then((data) => ({ data, error: null }))
+            .catch((orderError) => ({ data: [], error: orderError }))
         : Promise.resolve({ data: [], error: null });
 
       const detailQueries = DETAIL_COVERAGE_LEVELS.map((level) => applyMarket(
@@ -1845,9 +1993,10 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
           .range(0, 9999)
       );
 
-      const [campaignMetricResult, previousCampaignMetricResult, metaResult, runsResult, businessDailyResult, businessProviderResult, ...detailAndCountResults] = await Promise.all([
+      const [campaignMetricResult, previousCampaignMetricResult, previousOrdersResult, metaResult, runsResult, businessDailyResult, businessProviderResult, ...detailAndCountResults] = await Promise.all([
         campaignMetricQuery,
         previousCampaignMetricQuery,
+        previousOrdersPromise,
         metaQuery,
         runsQuery,
         businessDailyQuery,
@@ -1871,6 +2020,16 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
         setDailyRows(campaignMetricResult.data || []);
         setCampaignRows(campaignMetricResult.data || []);
         setPreviousCampaignRows(previousCampaignMetricResult.data || []);
+        setPreviousOrders(previousOrdersResult.data || []);
+        setPreviousOrderState(previousOrdersResult.error
+          ? {
+              status: 'error',
+              message: `Předchozí objednávky se nepodařilo načíst: ${previousOrdersResult.error.message || 'neznámá chyba'}.`,
+            }
+          : {
+              status: previousRange ? 'loaded' : 'idle',
+              message: previousRange ? '' : 'Bez předchozího období.',
+            });
         setDetailRows(detailResults.flatMap((result) => result.data || []));
         setDetailCounts({
           byLevel: Object.fromEntries(DETAIL_COVERAGE_LEVELS.map((level, index) => [
@@ -1933,6 +2092,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
   const businessViewsLoaded = businessViewState.status === 'loaded';
   const businessViewsHaveRows = businessViewsLoaded && businessDailyRows.length > 0;
   const localOrderTotal = useMemo(() => aggregateOrders(orders), [orders]);
+  const previousOrderTotal = useMemo(() => aggregateOrders(previousOrders), [previousOrders]);
   const businessOrderTotal = useMemo(() => orderMetricsFromBusinessRows(businessDailyRows), [businessDailyRows]);
   const orderTotal = businessViewsHaveRows ? businessOrderTotal : localOrderTotal;
   const orderByDate = useMemo(() => aggregateOrdersByDate(orders), [orders]);
@@ -1973,7 +2133,10 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
     previousMarkets,
     currentCampaigns: campaigns,
     previousCampaigns,
-  }), [dateFrom, dateTo, comparisonRange, total, previousTotal, campaignRows, previousMarkets, campaigns, previousCampaigns]);
+    currentOrderTotal: orderTotal,
+    previousOrderTotal,
+    previousOrderState,
+  }), [dateFrom, dateTo, comparisonRange, total, previousTotal, campaignRows, previousMarkets, campaigns, previousCampaigns, orderTotal, previousOrderTotal, previousOrderState]);
   const topDevices = useMemo(() => aggregateDetails(detailRows, 'device'), [detailRows]);
   const topAdGroups = useMemo(() => aggregateDetails(detailRows, 'ad_group'), [detailRows]);
   const topAds = useMemo(() => aggregateDetails(detailRows, 'ad'), [detailRows]);
