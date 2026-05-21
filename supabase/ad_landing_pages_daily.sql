@@ -207,3 +207,27 @@ revoke all on public.ad_landing_page_period_type_summary from anon;
 revoke all on public.ad_landing_page_period_url_summary from anon;
 grant select on public.ad_landing_page_period_type_summary to authenticated;
 grant select on public.ad_landing_page_period_url_summary to authenticated;
+
+create materialized view if not exists public.ad_landing_page_period_type_summary_mv as
+select *
+from public.ad_landing_page_period_type_summary
+with no data;
+
+create materialized view if not exists public.ad_landing_page_period_url_summary_mv as
+select *
+from public.ad_landing_page_period_url_summary
+with no data;
+
+create index if not exists ad_landing_page_period_type_summary_mv_lookup_idx
+  on public.ad_landing_page_period_type_summary_mv (market, resource, period_bucket);
+
+create index if not exists ad_landing_page_period_url_summary_mv_lookup_idx
+  on public.ad_landing_page_period_url_summary_mv (market, resource, period_bucket);
+
+create index if not exists ad_landing_page_period_url_summary_mv_spend_idx
+  on public.ad_landing_page_period_url_summary_mv (resource, cost_czk desc);
+
+revoke all on public.ad_landing_page_period_type_summary_mv from anon;
+revoke all on public.ad_landing_page_period_url_summary_mv from anon;
+grant select on public.ad_landing_page_period_type_summary_mv to authenticated;
+grant select on public.ad_landing_page_period_url_summary_mv to authenticated;

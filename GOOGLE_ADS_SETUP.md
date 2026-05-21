@@ -62,6 +62,8 @@ The detailed schema creates:
 - `marketing_business_daily_total`
 - `ad_landing_pages_daily`
 - `ad_landing_page_daily_summary`
+- `ad_landing_page_period_type_summary_mv`
+- `ad_landing_page_period_url_summary_mv`
 
 Detailed dimensions such as search term, product, device, audience, geo and
 placement are stored in `ad_metrics_daily.dimensions` and the full source row is
@@ -158,6 +160,8 @@ default for canonical Ads spend/click/conversion totals; `landing_page_view`
 contains the unexpanded URL diagnostic mirror and should not be summed together
 with expanded rows unless you explicitly want to compare URL shapes rather than
 totals.
+The report reads refreshed materialized summaries so it does not scan the full
+landing-page table on every run.
 
 Meta only:
 
