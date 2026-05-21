@@ -1,0 +1,61 @@
+name: Check Google Ads Landing Pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      markets:
+        description: 'Markets, for example cz or cz,sk,hu,ro'
+        required: false
+        default: 'cz,sk,hu,ro'
+      from_date:
+        description: 'Report start date YYYY-MM-DD'
+        required: false
+        default: '2026-04-01'
+      to_date:
+        description: 'Report end date YYYY-MM-DD'
+        required: false
+        default: ''
+      debug_hu_hp_sessions:
+        description: 'Set to 1 to also run HU homepage paid-session debug'
+        required: false
+        default: '0'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run verify:ads-readonly
+
+      - name: Check landing-page diagnostics
+        run: npm run check:google-ads-landing-pages
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          REPORT_MARKETS: ${{ github.event.inputs.markets || 'cz,sk,hu,ro' }}
+          REPORT_FROM_DATE: ${{ github.event.inputs.from_date || '2026-04-01' }}
+          REPORT_TO_DATE: ${{ github.event.inputs.to_date || '' }}
+
+      - name: Debug HU homepage paid sessions
+        if: github.event.inputs.debug_hu_hp_sessions == '1'
+        run: npm run debug:hu-hp-sessions
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GA_SESSIONS_TABLE: ${{ vars.GA_SESSIONS_TABLE || 'sl_session_recordings' }}
+          GA_EVENTS_TABLE: ${{ vars.GA_EVENTS_TABLE || 'sl_events' }}
+          GA_SITE_COLUMN: ${{ vars.GA_SITE_COLUMN || 'site_key' }}
+          GA_SESSION_DATE_COLUMN: ${{ vars.GA_SESSION_DATE_COLUMN || 'started_at' }}
+          GA_SITE_KEY: hu
+          DEBUG_FROM_DATE: '2026-05-14'
+          DEBUG_TO_DATE: ${{ github.event.inputs.to_date || '' }}

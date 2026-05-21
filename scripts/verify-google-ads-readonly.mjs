@@ -14,6 +14,7 @@ import { join } from 'node:path';
 
 const GOOGLE_FILES_TO_CHECK = [
   'scripts/sync-google-ads-detail.mjs',
+  'scripts/sync-google-ads-landing-pages.mjs',
   'scripts/sync-google-ads-costs.mjs',
 ];
 
