@@ -7,6 +7,7 @@
  * - REPORT_FROM_DATE=2026-04-01
  * - REPORT_TO_DATE=today UTC
  * - REPORT_MARKETS=cz,sk,hu,ro
+ * - REPORT_RESOURCE=expanded_landing_page_view
  */
 
 import {
@@ -17,8 +18,10 @@ import {
   toDateString,
 } from './lib/ads-sync-utils.mjs';
 
-const TABLE = 'ad_landing_pages_daily';
+const TYPE_SUMMARY_VIEW = 'ad_landing_page_period_type_summary';
+const URL_SUMMARY_VIEW = 'ad_landing_page_period_url_summary';
 const DEFAULT_MARKETS = ['cz', 'sk', 'hu', 'ro'];
+const DEFAULT_RESOURCE = 'expanded_landing_page_view';
 
 function parseArgs() {
   const args = new Set(process.argv.slice(2));
@@ -38,42 +41,26 @@ function parseMarkets() {
     .filter(Boolean);
 }
 
-async function fetchAllRows({ supabaseUrl, serviceRoleKey, from, to, markets }) {
+async function fetchSummaryRows({ supabaseUrl, serviceRoleKey, table, markets, resource }) {
   const pageSize = Number(process.env.REPORT_PAGE_SIZE || 1000);
   const all = [];
   let offset = 0;
 
   while (true) {
+    const searchParams = {
+      select: '*',
+      market: `in.(${markets.join(',')})`,
+      order: 'period_bucket.asc',
+      limit: pageSize,
+      offset,
+    };
+    if (resource !== 'all') searchParams.resource = `eq.${resource}`;
+
     const batch = await supabaseRequest({
       supabaseUrl,
       serviceRoleKey,
-      path: `/rest/v1/${TABLE}`,
-      searchParams: {
-        select: [
-          'date',
-          'market',
-          'resource',
-          'customer_id',
-          'campaign_id',
-          'campaign_name',
-          'channel_type',
-          'channel_sub_type',
-          'landing_page_url',
-          'landing_page_type',
-          'product_size_flag',
-          'cost_czk',
-          'impressions',
-          'clicks',
-          'conversions',
-          'conversion_value_czk',
-          'ads_aov_czk',
-        ].join(','),
-        date: [`gte.${from}`, `lte.${to}`],
-        market: `in.(${markets.join(',')})`,
-        order: 'date.asc',
-        limit: pageSize,
-        offset,
-      },
+      path: `/rest/v1/${table}`,
+      searchParams,
     });
 
     all.push(...batch);
@@ -99,13 +86,6 @@ function channelBucket(row) {
   return type || 'unknown';
 }
 
-function periodBucket(date) {
-  if (date >= '2026-04-01' && date <= '2026-04-30') return '2026-04';
-  if (date >= '2026-05-01' && date <= '2026-05-13') return '2026-05-01..13';
-  if (date >= '2026-05-14') return '2026-05-14+';
-  return 'other';
-}
-
 function emptyMetric() {
   return {
     rows: 0,
@@ -118,7 +98,7 @@ function emptyMetric() {
 }
 
 function addMetrics(target, row) {
-  target.rows += 1;
+  target.rows += number(row.row_count) || 1;
   target.spendCzk += number(row.cost_czk);
   target.impressions += number(row.impressions);
   target.clicks += number(row.clicks);
@@ -168,13 +148,10 @@ function aggregateLandingPages(rows) {
         landing_page_type: row.landing_page_type || 'other',
         product_size_flag: row.product_size_flag || 'other',
         landing_page_url: row.landing_page_url || '',
-        campaign_names: new Set(),
       });
     }
 
-    const target = grouped.get(key);
-    addMetrics(target, row);
-    if (row.campaign_name) target.campaign_names.add(row.campaign_name);
+    addMetrics(grouped.get(key), row);
   }
 
   return [...grouped.values()].map((metric) => ({
@@ -183,7 +160,6 @@ function aggregateLandingPages(rows) {
     landing_page_type: metric.landing_page_type,
     product_size_flag: metric.product_size_flag,
     landing_page_url: metric.landing_page_url,
-    campaigns: [...metric.campaign_names].slice(0, 4),
     ...finalizeMetric(metric),
   }));
 }
@@ -223,10 +199,10 @@ function printRows(title, rows, columns, limit = rows.length) {
   }
 }
 
-function buildReport(rows) {
-  const roRows = rows.filter((row) => row.market === 'ro' && ['2026-04', '2026-05-14+'].includes(periodBucket(row.date)));
+function buildReport({ typeRows, urlRows, resource }) {
+  const roRows = typeRows.filter((row) => row.market === 'ro' && ['2026-04', '2026-05-14+'].includes(row.period_bucket));
   const roByPeriodChannelType = groupRows(roRows, (row) => [
-    periodBucket(row.date),
+    row.period_bucket,
     channelBucket(row),
     row.landing_page_type || 'other',
     row.product_size_flag || 'other',
@@ -242,9 +218,9 @@ function buildReport(rows) {
     }))
     .sort((a, b) => number(b.spend_czk) - number(a.spend_czk));
 
-  const huRows = rows.filter((row) => row.market === 'hu');
-  const huPeriods = groupRows(huRows, (row) => [periodBucket(row.date), channelBucket(row)].join(' / '));
-  const huHpPeriods = groupRows(huRows.filter((row) => row.landing_page_type === 'hp'), (row) => [periodBucket(row.date), channelBucket(row)].join(' / '));
+  const huRows = typeRows.filter((row) => row.market === 'hu');
+  const huPeriods = groupRows(huRows, (row) => [row.period_bucket, channelBucket(row)].join(' / '));
+  const huHpPeriods = groupRows(huRows.filter((row) => row.landing_page_type === 'hp'), (row) => [row.period_bucket, channelBucket(row)].join(' / '));
   const hpByKey = new Map(huHpPeriods.map((row) => [row.key, row]));
   const huHpShare = huPeriods
     .map((row) => {
@@ -263,7 +239,7 @@ function buildReport(rows) {
     })
     .sort((a, b) => number(b.hp_spend_share_pct) - number(a.hp_spend_share_pct));
 
-  const landingPages = aggregateLandingPages(rows);
+  const landingPages = aggregateLandingPages(urlRows);
   const top = {
     spend: topBy(landingPages, 'spend_czk'),
     clicks: topBy(landingPages, 'clicks'),
@@ -274,7 +250,9 @@ function buildReport(rows) {
 
   return {
     generated_at: new Date().toISOString(),
-    row_count: rows.length,
+    resource,
+    type_summary_rows: typeRows.length,
+    url_summary_rows: urlRows.length,
     ro_april_vs_post_2026_05_14: roByPeriodChannelType,
     hu_hp_share: huHpShare,
     top_landing_pages: top,
@@ -282,8 +260,10 @@ function buildReport(rows) {
 }
 
 function printReport(report) {
-  console.log(`# Google Ads Landing-Page Diagnostics`);
-  console.log(`Rows: ${report.row_count}`);
+  console.log('# Google Ads Landing-Page Diagnostics');
+  console.log(`Resource: ${report.resource}`);
+  console.log(`Type summary rows: ${report.type_summary_rows}`);
+  console.log(`URL summary rows: ${report.url_summary_rows}`);
   console.log(`Generated: ${report.generated_at}`);
 
   printRows(
@@ -342,9 +322,20 @@ async function main() {
   const from = process.env.REPORT_FROM_DATE || '2026-04-01';
   const to = process.env.REPORT_TO_DATE || todayUtc();
   const markets = parseMarkets();
+  const resource = process.env.REPORT_RESOURCE || DEFAULT_RESOURCE;
 
-  const rows = await fetchAllRows({ supabaseUrl, serviceRoleKey, from, to, markets });
-  const report = buildReport(rows);
+  if (from !== '2026-04-01' || to < '2026-05-14') {
+    console.warn('[check-google-ads-landing-pages] Optimized report uses fixed period buckets: 2026-04, 2026-05-01..13 and 2026-05-14+.');
+  }
+  if (resource === 'all') {
+    console.warn('[check-google-ads-landing-pages] REPORT_RESOURCE=all can double count metrics because expanded and unexpanded landing-page views both carry Ads metrics.');
+  }
+
+  const [typeRows, urlRows] = await Promise.all([
+    fetchSummaryRows({ supabaseUrl, serviceRoleKey, table: TYPE_SUMMARY_VIEW, markets, resource }),
+    fetchSummaryRows({ supabaseUrl, serviceRoleKey, table: URL_SUMMARY_VIEW, markets, resource }),
+  ]);
+  const report = buildReport({ typeRows, urlRows, resource });
 
   if (args.json) {
     console.log(JSON.stringify(report, null, 2));

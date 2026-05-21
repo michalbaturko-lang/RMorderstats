@@ -153,6 +153,12 @@ REPORT_FROM_DATE=2026-04-01 npm run check:google-ads-landing-pages
 DEBUG_FROM_DATE=2026-05-14 npm run debug:hu-hp-sessions
 ```
 
+The report defaults to `REPORT_RESOURCE=expanded_landing_page_view`. Keep that
+default for canonical Ads spend/click/conversion totals; `landing_page_view`
+contains the unexpanded URL diagnostic mirror and should not be summed together
+with expanded rows unless you explicitly want to compare URL shapes rather than
+totals.
+
 Meta only:
 
 ```bash

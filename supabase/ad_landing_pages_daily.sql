@@ -121,3 +121,89 @@ begin
     for select to authenticated using (true);
   end if;
 end $$;
+
+create or replace view public.ad_landing_page_period_type_summary as
+select
+  case
+    when date between date '2026-04-01' and date '2026-04-30' then '2026-04'
+    when date between date '2026-05-01' and date '2026-05-13' then '2026-05-01..13'
+    when date >= date '2026-05-14' then '2026-05-14+'
+    else 'other'
+  end as period_bucket,
+  market,
+  resource,
+  channel_type,
+  channel_sub_type,
+  landing_page_type,
+  product_size_flag,
+  count(*) as row_count,
+  count(distinct campaign_id) as campaign_count,
+  count(distinct landing_page_url) as landing_page_count,
+  sum(coalesce(cost_czk, 0)) as cost_czk,
+  sum(coalesce(impressions, 0)) as impressions,
+  sum(coalesce(clicks, 0)) as clicks,
+  sum(coalesce(conversions, 0)) as conversions,
+  sum(coalesce(conversion_value_czk, 0)) as conversion_value_czk,
+  case
+    when sum(coalesce(conversions, 0)) > 0 then sum(coalesce(conversion_value_czk, 0)) / sum(coalesce(conversions, 0))
+    else null
+  end as ads_aov_czk,
+  case
+    when sum(coalesce(cost_czk, 0)) > 0 then sum(coalesce(conversion_value_czk, 0)) / sum(coalesce(cost_czk, 0))
+    else null
+  end as ads_roas
+from public.ad_landing_pages_daily
+group by
+  period_bucket,
+  market,
+  resource,
+  channel_type,
+  channel_sub_type,
+  landing_page_type,
+  product_size_flag;
+
+create or replace view public.ad_landing_page_period_url_summary as
+select
+  case
+    when date between date '2026-04-01' and date '2026-04-30' then '2026-04'
+    when date between date '2026-05-01' and date '2026-05-13' then '2026-05-01..13'
+    when date >= date '2026-05-14' then '2026-05-14+'
+    else 'other'
+  end as period_bucket,
+  market,
+  resource,
+  channel_type,
+  channel_sub_type,
+  landing_page_type,
+  product_size_flag,
+  landing_page_url,
+  count(*) as row_count,
+  count(distinct campaign_id) as campaign_count,
+  sum(coalesce(cost_czk, 0)) as cost_czk,
+  sum(coalesce(impressions, 0)) as impressions,
+  sum(coalesce(clicks, 0)) as clicks,
+  sum(coalesce(conversions, 0)) as conversions,
+  sum(coalesce(conversion_value_czk, 0)) as conversion_value_czk,
+  case
+    when sum(coalesce(conversions, 0)) > 0 then sum(coalesce(conversion_value_czk, 0)) / sum(coalesce(conversions, 0))
+    else null
+  end as ads_aov_czk,
+  case
+    when sum(coalesce(cost_czk, 0)) > 0 then sum(coalesce(conversion_value_czk, 0)) / sum(coalesce(cost_czk, 0))
+    else null
+  end as ads_roas
+from public.ad_landing_pages_daily
+group by
+  period_bucket,
+  market,
+  resource,
+  channel_type,
+  channel_sub_type,
+  landing_page_type,
+  product_size_flag,
+  landing_page_url;
+
+revoke all on public.ad_landing_page_period_type_summary from anon;
+revoke all on public.ad_landing_page_period_url_summary from anon;
+grant select on public.ad_landing_page_period_type_summary to authenticated;
+grant select on public.ad_landing_page_period_url_summary to authenticated;
