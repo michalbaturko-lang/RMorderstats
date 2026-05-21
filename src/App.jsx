@@ -1503,8 +1503,8 @@ export default function App() {
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
           <KPICard title="Objednávky" value={formatNumber(kpis.orders)} icon="🛒" />
           <KPICard title="Obrat (bez DPH)" value={formatCurrency(kpis.revenue)} icon="💰" sub={adsPnoSub} subTone={hasAdsData ? 'red' : 'muted'} />
-          <KPICard title="Tržba z poštovného" value={formatCurrency(kpis.shippingRevenue)} icon="🚚" sub="bez DPH, mimo PNO" />
           <KPICard title="Ø Objednávka" value={formatCurrency(kpis.aov)} icon="📦" />
+          <KPICard title="Tržba z poštovného" value={formatCurrency(kpis.shippingRevenue)} icon="🚚" sub="bez DPH, mimo PNO" />
           <KPICard title="B2B podíl" value={`${kpis.b2bPct.toFixed(0)}%`} icon="🏢" sub={`🏙️ Velká města: ${kpis.bigPct.toFixed(0)}%`} />
         </div>
 
