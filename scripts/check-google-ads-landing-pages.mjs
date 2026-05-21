@@ -19,7 +19,7 @@ import {
 } from './lib/ads-sync-utils.mjs';
 
 const TYPE_SUMMARY_VIEW = 'ad_landing_page_period_type_summary_mv';
-const URL_SUMMARY_VIEW = 'ad_landing_page_period_url_summary_mv';
+const URL_SUMMARY_VIEW = 'ad_landing_page_period_url_base_summary_mv';
 const DEFAULT_MARKETS = ['cz', 'sk', 'hu', 'ro'];
 const DEFAULT_RESOURCE = 'expanded_landing_page_view';
 

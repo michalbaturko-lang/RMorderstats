@@ -64,6 +64,7 @@ The detailed schema creates:
 - `ad_landing_page_daily_summary`
 - `ad_landing_page_period_type_summary_mv`
 - `ad_landing_page_period_url_summary_mv`
+- `ad_landing_page_period_url_base_summary_mv`
 
 Detailed dimensions such as search term, product, device, audience, geo and
 placement are stored in `ad_metrics_daily.dimensions` and the full source row is
@@ -162,6 +163,9 @@ with expanded rows unless you explicitly want to compare URL shapes rather than
 totals.
 The report reads refreshed materialized summaries so it does not scan the full
 landing-page table on every run.
+Top landing pages are grouped by base URL without query parameters; full query
+strings remain available in `ad_landing_pages_daily.raw_data` and the HU
+small-GA debug output.
 
 Meta only:
 
