@@ -53,6 +53,13 @@ jobs:
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
 
+      - name: Refresh landing-page summary materialized views
+        run: |
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "refresh materialized view public.ad_landing_page_period_type_summary_mv;"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "refresh materialized view public.ad_landing_page_period_url_summary_mv;"
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+
       - name: Verify table and summary view exist
         run: |
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -At -c "
@@ -60,7 +67,12 @@ jobs:
             from pg_class c
             join pg_namespace n on n.oid = c.relnamespace
             where n.nspname = 'public'
-              and relname in ('ad_landing_pages_daily', 'ad_landing_page_daily_summary')
+              and relname in (
+                'ad_landing_pages_daily',
+                'ad_landing_page_daily_summary',
+                'ad_landing_page_period_type_summary_mv',
+                'ad_landing_page_period_url_summary_mv'
+              )
             order by relname;
           "
         env:
