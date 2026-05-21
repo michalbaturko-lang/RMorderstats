@@ -14,6 +14,7 @@ import { basename, relative, resolve } from 'node:path';
 
 const allowedFiles = new Set([
   'ad_business_analytics_views.sql',
+  'ad_landing_pages_daily.sql',
   'ad_marketing_view_security_fix.sql',
 ]);
 

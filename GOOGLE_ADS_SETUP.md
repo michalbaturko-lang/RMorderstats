@@ -43,6 +43,8 @@ Run these SQL scripts in Supabase SQL editor:
 - `supabase/ad_marketing_analytics.sql` for the detailed model
 - `supabase/ad_business_analytics_views.sql` for reusable business views that
   join Ads spend with deduplicated non-cancelled order revenue and exact margin
+- `supabase/ad_landing_pages_daily.sql` for additive Google Ads landing-page
+  diagnostics
 
 The detailed schema creates:
 
@@ -58,6 +60,8 @@ The detailed schema creates:
 - `order_business_daily_summary`
 - `marketing_business_provider_daily_summary`
 - `marketing_business_daily_total`
+- `ad_landing_pages_daily`
+- `ad_landing_page_daily_summary`
 
 Detailed dimensions such as search term, product, device, audience, geo and
 placement are stored in `ad_metrics_daily.dimensions` and the full source row is
@@ -136,6 +140,19 @@ Google only:
 npm run sync:ads-analytics:google
 ```
 
+Landing-page diagnostics only:
+
+```bash
+npm run verify:ads-readonly
+node scripts/verify-supabase-sql-safe.mjs supabase/ad_landing_pages_daily.sql
+npm run sync:google-ads-landing-pages -- --validate-only
+SYNC_FROM_DATE=2026-04-01 SYNC_TO_DATE=2026-04-30 SYNC_MARKETS=cz,sk,hu,ro npm run sync:google-ads-landing-pages
+SYNC_FROM_DATE=2026-05-01 SYNC_TO_DATE=2026-05-13 SYNC_MARKETS=cz,sk,hu,ro npm run sync:google-ads-landing-pages
+SYNC_FROM_DATE=2026-05-14 SYNC_TO_DATE=2026-05-21 SYNC_MARKETS=cz,sk,hu,ro npm run sync:google-ads-landing-pages
+REPORT_FROM_DATE=2026-04-01 npm run check:google-ads-landing-pages
+DEBUG_FROM_DATE=2026-05-14 npm run debug:hu-hp-sessions
+```
+
 Meta only:
 
 ```bash
@@ -199,6 +216,19 @@ Workflows:
   - runs `verify:ads-readonly` and `verify:supabase-sql-safe` before applying
   - applies only the allowlisted business-view SQL, then runs
     `check:ads-business-views` with `ADS_BUSINESS_VIEWS_REQUIRE=1`
+- `.github/workflows/apply-ad-landing-pages-table.yml`
+  - manual workflow for applying `supabase/ad_landing_pages_daily.sql`
+  - requires `confirm=APPLY_LANDING_PAGES_TABLE` and `SUPABASE_DB_URL`
+- `.github/workflows/sync-google-ads-landing-pages.yml`
+  - daily and manual read-only landing-page sync
+  - supports manual backfills via `from_date` / `to_date`; use the three
+    chunks `2026-04-01..2026-04-30`, `2026-05-01..2026-05-13` and
+    `2026-05-14..today` for the RO/HU diagnostics
+- `.github/workflows/check-google-ads-landing-pages.yml`
+  - manual report for RO April vs post-2026-05-14, HU homepage share and top
+    landing pages by spend, clicks, conversions, conversion value and Ads AOV
+  - optional `debug_hu_hp_sessions=1` runs the small-GA HU homepage cpc session
+    debug
 - `.github/workflows/check-ads-sync-health.yml`
   - every 30 minutes, offset from the 15-minute spend sync
   - read-only health monitor for sync freshness and today's campaign rows
@@ -256,6 +286,8 @@ Quota discipline:
 For Google Ads:
 
 - campaign AOV/value per conversion
+- landing pages by expanded/unexpanded final URL, spend, clicks, conversions,
+  conversion value, Ads AOV, page type and size flag
 - Shopping product AOV and conversion value
 - search terms that spend but bring no value
 - device split

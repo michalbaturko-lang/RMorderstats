@@ -1,0 +1,85 @@
+name: Sync Google Ads Landing Pages
+
+on:
+  schedule:
+    - cron: '12 4 * * *'
+  workflow_dispatch:
+    inputs:
+      markets:
+        description: 'Markets, for example cz or cz,sk,hu,ro'
+        required: false
+        default: 'cz,sk,hu,ro'
+      from_date:
+        description: 'Backfill start date YYYY-MM-DD'
+        required: false
+        default: ''
+      to_date:
+        description: 'Backfill end date YYYY-MM-DD'
+        required: false
+        default: ''
+      days_back:
+        description: 'Rolling window when from/to is empty'
+        required: false
+        default: '3'
+      resources:
+        description: 'expanded,unexpanded'
+        required: false
+        default: 'expanded,unexpanded'
+      validate_only:
+        description: 'Set to 1 to only validate Google Ads GAQL compatibility'
+        required: false
+        default: '0'
+
+concurrency:
+  group: google-ads-landing-pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run verify:ads-readonly
+
+      - run: node scripts/verify-supabase-sql-safe.mjs supabase/ad_landing_pages_daily.sql
+
+      - name: Validate or sync Google Ads landing pages
+        run: |
+          if [ "${VALIDATE_ONLY}" = "1" ]; then
+            npm run sync:google-ads-landing-pages -- --validate-only
+          else
+            npm run sync:google-ads-landing-pages
+          fi
+        env:
+          VALIDATE_ONLY: ${{ github.event.inputs.validate_only || '0' }}
+          SYNC_MARKETS: ${{ github.event.inputs.markets || vars.SYNC_MARKETS || 'cz,sk,hu,ro' }}
+          SYNC_FROM_DATE: ${{ github.event.inputs.from_date || '' }}
+          SYNC_TO_DATE: ${{ github.event.inputs.to_date || '' }}
+          SYNC_DAYS_BACK: ${{ github.event.inputs.days_back || vars.ADS_LANDING_PAGES_DAYS_BACK || '3' }}
+          FX_RATES_JSON: ${{ vars.FX_RATES_JSON || '{"CZK":1,"EUR":25.2,"HUF":0.063,"RON":5.1}' }}
+
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+          GOOGLE_ADS_DEVELOPER_TOKEN: ${{ secrets.GOOGLE_ADS_DEVELOPER_TOKEN }}
+          GOOGLE_ADS_CLIENT_ID: ${{ secrets.GOOGLE_ADS_CLIENT_ID }}
+          GOOGLE_ADS_CLIENT_SECRET: ${{ secrets.GOOGLE_ADS_CLIENT_SECRET }}
+          GOOGLE_ADS_REFRESH_TOKEN: ${{ secrets.GOOGLE_ADS_REFRESH_TOKEN }}
+          GOOGLE_ADS_BASE44_APP_ID: ${{ secrets.GOOGLE_ADS_BASE44_APP_ID }}
+          GOOGLE_ADS_BASE44_ACCESS_TOKEN: ${{ secrets.GOOGLE_ADS_BASE44_ACCESS_TOKEN }}
+          GOOGLE_ADS_BASE44_TOKEN_ACCOUNT_ID: ${{ secrets.GOOGLE_ADS_BASE44_TOKEN_ACCOUNT_ID }}
+          GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${{ secrets.GOOGLE_ADS_LOGIN_CUSTOMER_ID }}
+          GOOGLE_ADS_ACCOUNTS_JSON: ${{ secrets.GOOGLE_ADS_ACCOUNTS_JSON }}
+          GOOGLE_ADS_API_VERSION: ${{ vars.GOOGLE_ADS_API_VERSION || 'v23' }}
+          GOOGLE_ADS_LANDING_PAGE_RESOURCES: ${{ github.event.inputs.resources || vars.GOOGLE_ADS_LANDING_PAGE_RESOURCES || 'expanded,unexpanded' }}
+          GOOGLE_ADS_LANDING_PAGE_PREFLIGHT: ${{ vars.GOOGLE_ADS_LANDING_PAGE_PREFLIGHT || '1' }}

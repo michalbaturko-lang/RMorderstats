@@ -1,0 +1,67 @@
+name: Apply Ads Landing Pages Table
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type APPLY_LANDING_PAGES_TABLE to apply supabase/ad_landing_pages_daily.sql'
+        required: true
+        default: ''
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run verify:ads-readonly
+
+      - run: node scripts/verify-supabase-sql-safe.mjs supabase/ad_landing_pages_daily.sql
+
+      - name: Require explicit confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "APPLY_LANDING_PAGES_TABLE" ]; then
+            echo "Refusing to apply SQL. Re-run with confirm=APPLY_LANDING_PAGES_TABLE."
+            exit 1
+          fi
+
+      - name: Require database connection secret
+        run: |
+          if [ -z "${SUPABASE_DB_URL}" ]; then
+            echo "Missing SUPABASE_DB_URL secret. Add the Supabase Postgres connection string as a GitHub secret before running this workflow."
+            exit 1
+          fi
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+
+      - name: Install Postgres client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Apply landing-page diagnostics table
+        run: psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/ad_landing_pages_daily.sql
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+
+      - name: Verify table and summary view exist
+        run: |
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -At -c "
+            select relname
+            from pg_class c
+            join pg_namespace n on n.oid = c.relnamespace
+            where n.nspname = 'public'
+              and relname in ('ad_landing_pages_daily', 'ad_landing_page_daily_summary')
+            order by relname;
+          "
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
