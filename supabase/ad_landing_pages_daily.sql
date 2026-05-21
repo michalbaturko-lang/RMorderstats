@@ -218,6 +218,47 @@ select *
 from public.ad_landing_page_period_url_summary
 with no data;
 
+create or replace view public.ad_landing_page_period_url_base_summary as
+select
+  period_bucket,
+  market,
+  resource,
+  channel_type,
+  channel_sub_type,
+  landing_page_type,
+  product_size_flag,
+  split_part(landing_page_url, '?', 1) as landing_page_url,
+  count(*) as row_count,
+  sum(coalesce(campaign_count, 0)) as campaign_count,
+  sum(coalesce(cost_czk, 0)) as cost_czk,
+  sum(coalesce(impressions, 0)) as impressions,
+  sum(coalesce(clicks, 0)) as clicks,
+  sum(coalesce(conversions, 0)) as conversions,
+  sum(coalesce(conversion_value_czk, 0)) as conversion_value_czk,
+  case
+    when sum(coalesce(conversions, 0)) > 0 then sum(coalesce(conversion_value_czk, 0)) / sum(coalesce(conversions, 0))
+    else null
+  end as ads_aov_czk,
+  case
+    when sum(coalesce(cost_czk, 0)) > 0 then sum(coalesce(conversion_value_czk, 0)) / sum(coalesce(cost_czk, 0))
+    else null
+  end as ads_roas
+from public.ad_landing_page_period_url_summary
+group by
+  period_bucket,
+  market,
+  resource,
+  channel_type,
+  channel_sub_type,
+  landing_page_type,
+  product_size_flag,
+  split_part(landing_page_url, '?', 1);
+
+create materialized view if not exists public.ad_landing_page_period_url_base_summary_mv as
+select *
+from public.ad_landing_page_period_url_base_summary
+with no data;
+
 create index if not exists ad_landing_page_period_type_summary_mv_lookup_idx
   on public.ad_landing_page_period_type_summary_mv (market, resource, period_bucket);
 
@@ -227,7 +268,17 @@ create index if not exists ad_landing_page_period_url_summary_mv_lookup_idx
 create index if not exists ad_landing_page_period_url_summary_mv_spend_idx
   on public.ad_landing_page_period_url_summary_mv (resource, cost_czk desc);
 
+create index if not exists ad_landing_page_period_url_base_summary_mv_lookup_idx
+  on public.ad_landing_page_period_url_base_summary_mv (market, resource, period_bucket);
+
+create index if not exists ad_landing_page_period_url_base_summary_mv_spend_idx
+  on public.ad_landing_page_period_url_base_summary_mv (resource, cost_czk desc);
+
 revoke all on public.ad_landing_page_period_type_summary_mv from anon;
 revoke all on public.ad_landing_page_period_url_summary_mv from anon;
+revoke all on public.ad_landing_page_period_url_base_summary from anon;
+revoke all on public.ad_landing_page_period_url_base_summary_mv from anon;
 grant select on public.ad_landing_page_period_type_summary_mv to authenticated;
 grant select on public.ad_landing_page_period_url_summary_mv to authenticated;
+grant select on public.ad_landing_page_period_url_base_summary to authenticated;
+grant select on public.ad_landing_page_period_url_base_summary_mv to authenticated;

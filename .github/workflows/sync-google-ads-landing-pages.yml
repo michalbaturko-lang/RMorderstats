@@ -99,5 +99,6 @@ jobs:
           fi
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "refresh materialized view public.ad_landing_page_period_type_summary_mv;"
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "refresh materialized view public.ad_landing_page_period_url_summary_mv;"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "refresh materialized view public.ad_landing_page_period_url_base_summary_mv;"
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
