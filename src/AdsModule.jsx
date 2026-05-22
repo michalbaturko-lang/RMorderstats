@@ -79,6 +79,7 @@ const formatCurrency = (value) => `${formatNumber(value)} Kč`;
 const formatSignedCurrency = (value) => `${toNumber(value) > 0 ? '+' : ''}${formatCurrency(value)}`;
 const formatPercent = (value) => `${toNumber(value).toFixed(1)} %`;
 const formatRatio = (value) => toNumber(value).toFixed(2).replace('.', ',');
+const errorMessage = (error) => error?.message || error?.details || 'neznámá chyba';
 const formatDate = (value) => {
   const [, month, day] = String(value || '').split('-');
   return month && day ? `${day}.${month}.` : value;
@@ -3190,6 +3191,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [partialWarning, setPartialWarning] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -3198,6 +3200,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
       if (!supabaseClient) return;
       setLoading(true);
       setError('');
+      setPartialWarning('');
 
       const applyMarket = (query) => {
         if (country && country !== 'all') return query.eq('market', country);
@@ -3314,8 +3317,27 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
       const detailResults = detailAndCountResults.slice(0, DETAIL_COVERAGE_LEVELS.length);
       const detailCountResults = detailAndCountResults.slice(DETAIL_COVERAGE_LEVELS.length, DETAIL_COVERAGE_LEVELS.length * 2);
       const providerDetailCountResults = detailAndCountResults.slice(DETAIL_COVERAGE_LEVELS.length * 2);
-      const firstError = [campaignMetricResult, previousCampaignMetricResult, hourlyRowsResult, metaResult, runsResult, ...detailResults].find((result) => result.error)?.error;
-      if (firstError) throw firstError;
+      if (campaignMetricResult.error) throw campaignMetricResult.error;
+
+      const optionalResults = [
+        { label: 'předchozí Ads období', result: previousCampaignMetricResult },
+        { label: 'hodinový Ads spend', result: hourlyRowsResult },
+        { label: 'metadata kampaní', result: metaResult },
+        { label: 'sync běhy', result: runsResult },
+        ...detailResults.map((result, index) => ({
+          label: `detail ${LEVEL_LABELS[DETAIL_COVERAGE_LEVELS[index]] || DETAIL_COVERAGE_LEVELS[index]}`,
+          result,
+        })),
+        ...detailCountResults.map((result, index) => ({
+          label: `počet ${LEVEL_LABELS[DETAIL_COVERAGE_LEVELS[index]] || DETAIL_COVERAGE_LEVELS[index]}`,
+          result,
+        })),
+        ...providerDetailCountResults.map((result, index) => ({
+          label: `počet ${providerLabel(EXPECTED_PROVIDERS[index])}`,
+          result,
+        })),
+      ];
+      const optionalErrors = optionalResults.filter(({ result }) => result?.error);
 
       if (!cancelled) {
         const businessError = [businessDailyResult, businessProviderResult].find((result) => result.error)?.error;
@@ -3324,19 +3346,19 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
 
         setDailyRows(campaignMetricResult.data || []);
         setCampaignRows(campaignMetricResult.data || []);
-        setPreviousCampaignRows(previousCampaignMetricResult.data || []);
+        setPreviousCampaignRows(previousCampaignMetricResult.error ? [] : (previousCampaignMetricResult.data || []));
         setPreviousOrders(previousOrdersResult.data || []);
         setPreviousOrderState(previousOrdersResult.error
           ? {
               status: 'error',
-              message: `Předchozí objednávky se nepodařilo načíst: ${previousOrdersResult.error.message || 'neznámá chyba'}.`,
+              message: `Předchozí objednávky se nepodařilo načíst: ${errorMessage(previousOrdersResult.error)}.`,
             }
           : {
               status: previousRange ? 'loaded' : 'idle',
               message: previousRange ? '' : 'Bez předchozího období.',
             });
-        setDetailRows(detailResults.flatMap((result) => result.data || []));
-        setHourlyRows(hourlyRowsResult.data || []);
+        setDetailRows(detailResults.flatMap((result) => result.error ? [] : (result.data || [])));
+        setHourlyRows(hourlyRowsResult.error ? [] : (hourlyRowsResult.data || []));
         setDetailCounts({
           byLevel: Object.fromEntries(DETAIL_COVERAGE_LEVELS.map((level, index) => [
             level,
@@ -3347,8 +3369,8 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
             providerDetailCountResults[index]?.error ? null : providerDetailCountResults[index]?.count,
           ])),
         });
-        setCampaignMetaRows(metaResult.data || []);
-        setSyncRuns(runsResult.data || []);
+        setCampaignMetaRows(metaResult.error ? [] : (metaResult.data || []));
+        setSyncRuns(runsResult.error ? [] : (runsResult.data || []));
         setBusinessDailyRows(businessAvailable ? (businessDailyResult.data || []) : []);
         setBusinessProviderRows(businessAvailable ? (businessProviderResult.data || []) : []);
         setBusinessViewState(businessAvailable
@@ -3369,8 +3391,11 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
                 status: 'error',
                 totalRows: 0,
                 providerRows: 0,
-                message: `Business views se nepodařilo načíst: ${businessError.message || 'neznámá chyba'}.`,
+                message: `Business views se nepodařilo načíst: ${errorMessage(businessError)}.`,
               });
+        setPartialWarning(optionalErrors.length
+          ? `Některé podpůrné Ads vrstvy se nenačetly (${optionalErrors.slice(0, 3).map(({ label, result }) => `${label}: ${errorMessage(result.error)}`).join('; ')}${optionalErrors.length > 3 ? `; +${optionalErrors.length - 3} další` : ''}). Souhrn spendu, PNO a kampaní zůstává načtený z campaign dat.`
+          : '');
       }
     }
 
@@ -3603,6 +3628,12 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
           </div>
         )}
       </div>
+
+      {partialWarning && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          {partialWarning}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
         <Kpi label="Spend" value={formatCurrency(total.spend)} sub={`${formatNumber(total.clicks)} kliků`} tone="amber" />
