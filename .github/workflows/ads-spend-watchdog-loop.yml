@@ -1,0 +1,126 @@
+name: Ads Spend Watchdog Loop
+
+on:
+  schedule:
+    - cron: '6 */4 * * *'
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: 'How long the watchdog should keep refreshing Ads spend.'
+        required: false
+        default: '330'
+      interval_minutes:
+        description: 'Minutes between refresh attempts.'
+        required: false
+        default: '15'
+      providers:
+        description: 'Providers to refresh. Default is Google only because Meta is covered by Vercel cron.'
+        required: false
+        default: 'google_ads'
+      markets:
+        description: 'Markets, for example cz or cz,sk,hu,ro.'
+        required: false
+        default: 'cz,sk,hu,ro'
+      days_back:
+        description: 'Rolling window to refresh. 1 means yesterday + today.'
+        required: false
+        default: '1'
+
+concurrency:
+  group: ads-spend-watchdog-loop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    env:
+      DURATION_MINUTES: ${{ github.event.inputs.duration_minutes || vars.ADS_WATCHDOG_DURATION_MINUTES || '330' }}
+      INTERVAL_MINUTES: ${{ github.event.inputs.interval_minutes || vars.ADS_WATCHDOG_INTERVAL_MINUTES || '15' }}
+      ADS_SYNC_PROVIDERS: ${{ github.event.inputs.providers || vars.ADS_WATCHDOG_PROVIDERS || 'google_ads' }}
+      SYNC_MARKETS: ${{ github.event.inputs.markets || vars.SYNC_MARKETS || 'cz,sk,hu,ro' }}
+      SYNC_DAYS_BACK: ${{ github.event.inputs.days_back || vars.ADS_SPEND_DAYS_BACK || '1' }}
+      ADS_SYNC_SKIP_MISSING_SECRETS: '1'
+      FX_RATES_JSON: ${{ vars.FX_RATES_JSON || '{"CZK":1,"EUR":25.2,"HUF":0.063,"RON":5.1}' }}
+
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+      GOOGLE_ADS_DEVELOPER_TOKEN: ${{ secrets.GOOGLE_ADS_DEVELOPER_TOKEN }}
+      GOOGLE_ADS_CLIENT_ID: ${{ secrets.GOOGLE_ADS_CLIENT_ID }}
+      GOOGLE_ADS_CLIENT_SECRET: ${{ secrets.GOOGLE_ADS_CLIENT_SECRET }}
+      GOOGLE_ADS_REFRESH_TOKEN: ${{ secrets.GOOGLE_ADS_REFRESH_TOKEN }}
+      GOOGLE_ADS_BASE44_APP_ID: ${{ secrets.GOOGLE_ADS_BASE44_APP_ID }}
+      GOOGLE_ADS_BASE44_ACCESS_TOKEN: ${{ secrets.GOOGLE_ADS_BASE44_ACCESS_TOKEN }}
+      GOOGLE_ADS_BASE44_TOKEN_ACCOUNT_ID: ${{ secrets.GOOGLE_ADS_BASE44_TOKEN_ACCOUNT_ID }}
+      GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${{ secrets.GOOGLE_ADS_LOGIN_CUSTOMER_ID }}
+      GOOGLE_ADS_ACCOUNTS_JSON: ${{ secrets.GOOGLE_ADS_ACCOUNTS_JSON }}
+      GOOGLE_ADS_API_VERSION: ${{ vars.GOOGLE_ADS_API_VERSION || 'v23' }}
+      GOOGLE_ADS_DETAIL_LEVELS: campaign,hour
+
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      META_ADS_ACCOUNTS_JSON: ${{ secrets.META_ADS_ACCOUNTS_JSON }}
+      META_GRAPH_API_VERSION: ${{ vars.META_GRAPH_API_VERSION || 'v24.0' }}
+      META_ADS_DETAIL_LEVELS: campaign
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run verify:ads-readonly
+
+      - name: Refresh Ads spend every interval
+        shell: bash
+        run: |
+          set -u
+
+          if ! [[ "$DURATION_MINUTES" =~ ^[0-9]+$ ]] || [ "$DURATION_MINUTES" -lt 15 ] || [ "$DURATION_MINUTES" -gt 350 ]; then
+            echo "DURATION_MINUTES must be an integer between 15 and 350. Received: $DURATION_MINUTES" >&2
+            exit 1
+          fi
+          if ! [[ "$INTERVAL_MINUTES" =~ ^[0-9]+$ ]] || [ "$INTERVAL_MINUTES" -lt 5 ] || [ "$INTERVAL_MINUTES" -gt 60 ]; then
+            echo "INTERVAL_MINUTES must be an integer between 5 and 60. Received: $INTERVAL_MINUTES" >&2
+            exit 1
+          fi
+
+          end_epoch=$(( $(date +%s) + DURATION_MINUTES * 60 ))
+          iteration=1
+
+          echo "Watchdog start: providers=$ADS_SYNC_PROVIDERS markets=$SYNC_MARKETS days_back=$SYNC_DAYS_BACK duration=${DURATION_MINUTES}m interval=${INTERVAL_MINUTES}m"
+
+          while true; do
+            echo "::group::Ads sync iteration ${iteration} at $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            if ! npm run sync:ads-analytics; then
+              echo "Ads sync iteration ${iteration} failed; watchdog will retry after the interval." >&2
+            fi
+            echo "::endgroup::"
+
+            echo "::group::Freshness check after iteration ${iteration}"
+            ADS_HEALTH_EXPECTED_PROVIDERS="$ADS_SYNC_PROVIDERS" \
+            ADS_HEALTH_EXPECTED_MARKETS="$SYNC_MARKETS" \
+            ADS_HEALTH_MAX_SYNC_AGE_MINUTES="$(( INTERVAL_MINUTES + 20 ))" \
+            ADS_HEALTH_REQUIRE_CURRENT_ROWS=0 \
+            ADS_HEALTH_REQUIRE_MARKET_ROWS=0 \
+            ADS_HEALTH_REQUIRE_ROWS_UPSERTED=1 \
+              npm run check:ads-sync-health || true
+            echo "::endgroup::"
+
+            now_epoch=$(date +%s)
+            next_epoch=$(( now_epoch + INTERVAL_MINUTES * 60 ))
+            if [ "$next_epoch" -ge "$end_epoch" ]; then
+              echo "Watchdog finished after ${iteration} iteration(s)."
+              break
+            fi
+
+            sleep_seconds=$(( INTERVAL_MINUTES * 60 ))
+            echo "Sleeping ${sleep_seconds}s before next refresh."
+            sleep "$sleep_seconds"
+            iteration=$(( iteration + 1 ))
+          done
