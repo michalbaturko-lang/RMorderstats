@@ -1,14 +1,12 @@
 name: Ads Spend Watchdog Loop
 
 on:
-  schedule:
-    - cron: '6 */4 * * *'
   workflow_dispatch:
     inputs:
       duration_minutes:
-        description: 'How long the watchdog should keep refreshing Ads spend.'
+        description: 'Manual-only watchdog runtime. Keep short to avoid burning Actions minutes.'
         required: false
-        default: '330'
+        default: '30'
       interval_minutes:
         description: 'Minutes between refresh attempts.'
         required: false
@@ -33,10 +31,10 @@ concurrency:
 jobs:
   watchdog:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 45
 
     env:
-      DURATION_MINUTES: ${{ github.event.inputs.duration_minutes || vars.ADS_WATCHDOG_DURATION_MINUTES || '330' }}
+      DURATION_MINUTES: ${{ github.event.inputs.duration_minutes || vars.ADS_WATCHDOG_DURATION_MINUTES || '30' }}
       INTERVAL_MINUTES: ${{ github.event.inputs.interval_minutes || vars.ADS_WATCHDOG_INTERVAL_MINUTES || '15' }}
       ADS_SYNC_PROVIDERS: ${{ github.event.inputs.providers || vars.ADS_WATCHDOG_PROVIDERS || 'google_ads' }}
       SYNC_MARKETS: ${{ github.event.inputs.markets || vars.SYNC_MARKETS || 'cz,sk,hu,ro' }}
@@ -81,8 +79,8 @@ jobs:
         run: |
           set -u
 
-          if ! [[ "$DURATION_MINUTES" =~ ^[0-9]+$ ]] || [ "$DURATION_MINUTES" -lt 15 ] || [ "$DURATION_MINUTES" -gt 350 ]; then
-            echo "DURATION_MINUTES must be an integer between 15 and 350. Received: $DURATION_MINUTES" >&2
+          if ! [[ "$DURATION_MINUTES" =~ ^[0-9]+$ ]] || [ "$DURATION_MINUTES" -lt 5 ] || [ "$DURATION_MINUTES" -gt 40 ]; then
+            echo "DURATION_MINUTES must be an integer between 5 and 40. Received: $DURATION_MINUTES" >&2
             exit 1
           fi
           if ! [[ "$INTERVAL_MINUTES" =~ ^[0-9]+$ ]] || [ "$INTERVAL_MINUTES" -lt 5 ] || [ "$INTERVAL_MINUTES" -gt 60 ]; then
