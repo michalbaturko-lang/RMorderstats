@@ -1,0 +1,332 @@
+{
+  "version": 1,
+  "updated_at": "2026-05-27",
+  "rules": {
+    "default_access": "read_only",
+    "business_data_mutations_allowed": false,
+    "ads_mutations_allowed": false,
+    "meta_mutations_allowed": false,
+    "upgates_mutations_allowed": false,
+    "requires_evidence_for_numbers": true,
+    "requires_missing_data_disclosure": true
+  },
+  "tools": [
+    {
+      "id": "get_orders_summary",
+      "label": "Souhrn objednávek",
+      "source_id": "upgates_orders",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["date_from", "date_to", "market"],
+      "outputs": ["orders", "real_orders", "revenue_without_vat_without_shipping", "aov", "b2b_share", "shipping_revenue"],
+      "evidence_fields": ["date_from", "date_to", "market", "excluded_statuses", "row_count", "freshness"],
+      "required_exclusions": ["STORNO", "Platba selhala"]
+    },
+    {
+      "id": "get_margin_breakdown",
+      "label": "Marže",
+      "source_id": "upgates_orders",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["date_from", "date_to", "market", "group_by"],
+      "outputs": ["revenue", "buy_cost", "gross_profit", "gross_profit_pct", "exact_orders", "missing_cost_orders"],
+      "evidence_fields": ["formula", "exact_order_count", "missing_cost_order_count", "excluded_statuses"],
+      "required_exclusions": ["STORNO", "Platba selhala"]
+    },
+    {
+      "id": "get_product_mix",
+      "label": "Produktový mix",
+      "source_id": "upgates_orders",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["date_from", "date_to", "market", "compare_to"],
+      "outputs": ["sku", "title", "quantity", "orders", "revenue", "gross_profit_pct", "share_of_revenue", "change_vs_previous"],
+      "evidence_fields": ["date_from", "date_to", "compare_to", "sku_count", "excluded_statuses"]
+    },
+    {
+      "id": "get_bundle_analysis",
+      "label": "Balíčky",
+      "source_id": "upgates_orders",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["date_from", "date_to", "market", "bundle_rule"],
+      "outputs": ["bundle_skus", "quantity", "orders", "revenue", "buy_cost", "gross_profit_pct", "daily_breakdown"],
+      "evidence_fields": ["bundle_detection_rule", "date_from", "date_to", "excluded_statuses"]
+    },
+    {
+      "id": "get_missing_buy_prices",
+      "label": "Chybějící nákupní ceny",
+      "source_id": "upgates_orders",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["date_from", "date_to", "market"],
+      "outputs": ["sku", "title", "quantity", "revenue", "orders"],
+      "evidence_fields": ["date_from", "date_to", "market", "affected_revenue"]
+    },
+    {
+      "id": "get_shipping_revenue",
+      "label": "Tržba z poštovného",
+      "source_id": "upgates_orders",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["date_from", "date_to", "market", "group_by"],
+      "outputs": ["shipping_revenue_without_vat", "orders", "market", "date"],
+      "evidence_fields": ["date_from", "date_to", "market", "excluded_statuses"]
+    },
+    {
+      "id": "get_ads_spend",
+      "label": "Ads spend",
+      "source_id": "google_ads",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["date_from", "date_to", "market", "provider"],
+      "outputs": ["spend", "pno", "real_roas", "platform_roas", "market_breakdown", "provider_breakdown"],
+      "evidence_fields": ["provider", "date_from", "date_to", "freshness", "sync_run"]
+    },
+    {
+      "id": "get_ads_campaigns",
+      "label": "Google Ads kampaně",
+      "source_id": "google_ads",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["date_from", "date_to", "market", "compare_to"],
+      "outputs": ["campaign", "spend", "clicks", "conversion_value", "real_revenue", "pno", "real_roas"],
+      "evidence_fields": ["date_from", "date_to", "market", "sync_run"]
+    },
+    {
+      "id": "get_ads_landing_pages",
+      "label": "Google Ads landing pages",
+      "source_id": "google_ads",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["date_from", "date_to", "market", "campaign_id", "compare_to"],
+      "outputs": ["landing_page", "expanded_landing_page", "spend", "clicks", "sessions_if_available", "page_type", "change_vs_previous"],
+      "evidence_fields": ["date_from", "date_to", "landing_page_source", "sync_run"]
+    },
+    {
+      "id": "get_ads_search_terms",
+      "label": "Google Ads search terms",
+      "source_id": "google_ads",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["date_from", "date_to", "market", "campaign_id"],
+      "outputs": ["search_term", "spend", "clicks", "conversions", "conversion_value"],
+      "evidence_fields": ["date_from", "date_to", "market", "sync_run"]
+    },
+    {
+      "id": "get_ads_shopping_products",
+      "label": "Google Ads shopping produkty",
+      "source_id": "google_ads",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["date_from", "date_to", "market", "campaign_id"],
+      "outputs": ["item_id", "title", "spend", "clicks", "conversions", "conversion_value"],
+      "evidence_fields": ["date_from", "date_to", "market", "sync_run"]
+    },
+    {
+      "id": "get_meta_spend",
+      "label": "Meta spend",
+      "source_id": "meta_ads",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["date_from", "date_to", "market"],
+      "outputs": ["spend", "pno", "real_roas", "campaign_count", "freshness"],
+      "evidence_fields": ["date_from", "date_to", "market", "sync_run", "access_status"]
+    },
+    {
+      "id": "get_meta_campaigns",
+      "label": "Meta kampaně",
+      "source_id": "meta_ads",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["date_from", "date_to", "market", "level"],
+      "outputs": ["campaign", "ad_set", "ad", "placement", "audience", "spend", "real_revenue", "pno"],
+      "evidence_fields": ["date_from", "date_to", "market", "sync_run", "access_status"]
+    },
+    {
+      "id": "get_small_ga_landing_pages",
+      "label": "Malá GA landing pages",
+      "source_id": "small_ga",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["date_from", "date_to", "market", "source_medium", "compare_to"],
+      "outputs": ["landing_page", "page_type", "sessions", "cart_events", "purchase_events", "add_to_cart_events", "cart_rate", "purchase_rate", "top_campaign", "change_vs_previous"],
+      "evidence_fields": ["date_from", "date_to", "tracker_status", "ingestion_freshness"]
+    },
+    {
+      "id": "get_small_ga_sessions",
+      "label": "Malá GA sessions",
+      "source_id": "small_ga",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["date_from", "date_to", "market", "source_medium", "campaign"],
+      "outputs": ["sessions", "events", "cart_rate", "purchase_rate", "source_breakdown", "campaign_breakdown"],
+      "evidence_fields": ["date_from", "date_to", "tracker_status", "ingestion_freshness"]
+    },
+    {
+      "id": "get_small_ga_funnel",
+      "label": "Malá GA funnel a commerce",
+      "source_id": "small_ga",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["date_from", "date_to", "market", "source_medium", "campaign", "landing_page"],
+      "outputs": ["add_to_cart_rate", "checkout_rate", "purchase_rate", "checkout_completion", "top_sources", "top_landing_pages", "cart_signals", "purchase_signals", "payment_methods", "shipping_methods", "cart_value", "matched_purchase_value", "top_cart_item"],
+      "evidence_fields": ["date_from", "date_to", "tracker_status", "ingestion_freshness", "event_schema"]
+    },
+    {
+      "id": "get_competitor_changes",
+      "label": "Konkurence Matrix",
+      "source_id": "matrix_competition",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["date_from", "date_to", "market", "sku_or_category"],
+      "outputs": ["competitor", "sku", "price_change", "availability_change", "new_products", "last_scraped_at"],
+      "evidence_fields": ["last_scraped_at", "market", "competitor"]
+    },
+    {
+      "id": "compare_periods",
+      "label": "Porovnání období",
+      "source_id": "upgates_orders",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["current_from", "current_to", "previous_from", "previous_to", "market", "metrics"],
+      "outputs": ["metric", "current", "previous", "absolute_change", "relative_change"],
+      "evidence_fields": ["current_range", "previous_range", "metric_definitions"]
+    },
+    {
+      "id": "get_data_freshness",
+      "label": "Čerstvost dat",
+      "source_id": "ai_memory",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["source_ids"],
+      "outputs": ["source_id", "last_sync_at", "status", "warnings"],
+      "evidence_fields": ["checked_at", "source_ids"]
+    },
+    {
+      "id": "get_known_contexts",
+      "label": "Business kontexty",
+      "source_id": "ai_memory",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["topic", "market", "limit"],
+      "outputs": ["context_id", "title", "body", "confidence", "updated_at"],
+      "evidence_fields": ["topic", "matched_contexts"]
+    },
+    {
+      "id": "get_relevant_memories",
+      "label": "Relevantní paměti",
+      "source_id": "ai_memory",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["topic", "market", "date_from", "date_to", "limit"],
+      "outputs": ["memory_id", "memory_type", "title", "body", "evidence", "confidence"],
+      "evidence_fields": ["topic", "matched_memories"]
+    },
+    {
+      "id": "get_relevant_examples",
+      "label": "Schválené příklady chování",
+      "source_id": "ai_memory",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["topic", "market", "limit"],
+      "outputs": ["example_id", "title", "expected_behavior", "required_playbooks", "must_include"],
+      "evidence_fields": ["topic", "matched_examples"]
+    },
+    {
+      "id": "get_meeting_notes",
+      "label": "Meeting notes",
+      "source_id": "ai_memory",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["topic", "market", "limit"],
+      "outputs": ["meeting_date", "title", "summary", "decisions", "action_items", "hypotheses"],
+      "evidence_fields": ["topic", "matched_meetings"]
+    },
+    {
+      "id": "get_experiments",
+      "label": "Experimenty",
+      "source_id": "ai_memory",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["topic", "market", "status", "limit"],
+      "outputs": ["slug", "title", "hypothesis", "status", "result_summary", "markets", "metrics"],
+      "evidence_fields": ["topic", "matched_experiments"]
+    },
+    {
+      "id": "get_import_orders_on_the_way",
+      "label": "Importní objednávky na cestě",
+      "source_id": "import_logistics",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["supplier", "status", "eta_from", "eta_to"],
+      "outputs": ["order_name", "supplier", "status", "shipped_date", "eta_port", "eta_brno", "containers", "container_count", "container_loading", "loading_photo_count", "total_qty", "goods_value_czk", "goods_value_by_currency", "matched_pct", "docs_coverage", "missing_prices", "risk_count"],
+      "evidence_fields": ["source_views", "checked_at", "in_transit_statuses", "coverage"]
+    },
+    {
+      "id": "get_import_order_detail",
+      "label": "Detail importní objednávky",
+      "source_id": "import_logistics",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["order_name", "import_order_id"],
+      "outputs": ["shipments", "container_loading", "loading_photos", "documents", "lines", "matched_products", "qty", "current_stock", "inbound_qty", "current_upgates_nc", "import_unit_cost", "landed_unit_cost"],
+      "evidence_fields": ["order_name", "source_sheet", "source_rows", "coverage"]
+    },
+    {
+      "id": "get_inbound_stock_risk",
+      "label": "Riziko stockoutu proti inboundu",
+      "source_id": "import_logistics",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["market", "horizon_days", "velocity_window"],
+      "outputs": ["sku", "ean", "title", "current_stock", "inbound_qty", "nearest_eta", "velocity_7d", "velocity_14d", "velocity_30d", "forecast_stockout_date", "stockout_before_eta"],
+      "evidence_fields": ["business_clean_orders", "excluded_statuses", "growth_assumption", "velocity_windows", "coverage"]
+    },
+    {
+      "id": "get_landed_cost_changes",
+      "label": "Změny nákupky a landed cost",
+      "source_id": "import_logistics",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["sku", "ean", "order", "supplier"],
+      "outputs": ["current_upgates_nc", "import_unit_cost", "allocated_freight_per_unit", "landed_unit_cost", "delta_abs", "delta_pct"],
+      "evidence_fields": ["freight_allocation_method", "missing_import_prices", "missing_freight_costs", "coverage"]
+    },
+    {
+      "id": "get_import_match_gaps",
+      "label": "Import match review",
+      "source_id": "import_logistics",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["order_name", "match_status"],
+      "outputs": ["order_name", "source_sheet", "source_row", "raw_spec", "candidate_count", "match_status", "reason"],
+      "evidence_fields": ["source_workbook", "source_sheet", "source_row", "candidate_count"]
+    },
+    {
+      "id": "get_import_document_coverage",
+      "label": "Coverage importních dokumentů",
+      "source_id": "import_logistics",
+      "access_mode": "read_only",
+      "allowed_operations": ["select"],
+      "inputs": ["order_name"],
+      "outputs": ["order_name", "has_supplier_invoice", "has_payment_proof", "has_packing_list", "has_kn_invoice", "has_bl_tracking", "has_loading_photos", "loading_photo_count", "missing_docs", "parsed_status"],
+      "evidence_fields": ["document_types", "extraction_status", "missing_docs", "checked_at"]
+    },
+    {
+      "id": "save_memory_candidate",
+      "label": "Návrh nové paměti",
+      "source_id": "ai_memory",
+      "access_mode": "append_candidate_only",
+      "allowed_operations": ["insert_ai_memory_candidate"],
+      "inputs": ["memory_type", "title", "body", "evidence", "confidence", "requires_human_review"],
+      "outputs": ["candidate_id", "review_status"],
+      "evidence_fields": ["source_conversation_id", "created_at"],
+      "guardrails": [
+        "nesmí měnit business data",
+        "nesmí přepsat existující paměť",
+        "musí být označeno jako candidate, dokud to nepotvrdí člověk"
+      ]
+    }
+  ]
+}

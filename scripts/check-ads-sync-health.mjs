@@ -171,13 +171,22 @@ async function main() {
       run.provider === provider &&
       String(run.sync_type || '').includes(CAMPAIGN_LEVEL)
     ));
+    const latestSuccessfulCampaignRun = (runs || []).find((run) => (
+      run.provider === provider &&
+      String(run.sync_type || '').includes(CAMPAIGN_LEVEL) &&
+      SUCCESS_STATUSES.has(String(run.status || '').toLowerCase())
+    ));
 
     if (!latestCampaignRun) {
       failures.push(`${provider}: no campaign sync run found in ad_sync_runs`);
       continue;
     }
 
-    const timestamp = runTimestamp(latestCampaignRun);
+    const latestStatus = String(latestCampaignRun.status || '').toLowerCase();
+    const latestRunIsActive = ['running', 'pending'].includes(latestStatus);
+    const runForFreshness = latestRunIsActive ? latestCampaignRun : (latestSuccessfulCampaignRun || latestCampaignRun);
+    const runForCompleteness = latestSuccessfulCampaignRun || latestCampaignRun;
+    const timestamp = runTimestamp(runForFreshness);
     const age = ageMinutes(timestamp, now);
     console.log([
       `[check-ads-sync-health] latest ${provider}`,
@@ -186,19 +195,22 @@ async function main() {
       `range=${latestCampaignRun.range_from}..${latestCampaignRun.range_to}`,
       `rows_upserted=${formatNumber(latestCampaignRun.rows_upserted)}`,
       `age_minutes=${Number.isFinite(age) ? age.toFixed(1) : 'n/a'}`,
-    ].join(' | '));
+      latestRunIsActive && latestSuccessfulCampaignRun
+        ? `last_success=${latestSuccessfulCampaignRun.range_from}..${latestSuccessfulCampaignRun.range_to}`
+        : null,
+    ].filter(Boolean).join(' | '));
 
-    if (!SUCCESS_STATUSES.has(String(latestCampaignRun.status || '').toLowerCase())) {
+    if (!latestRunIsActive && !SUCCESS_STATUSES.has(latestStatus)) {
       failures.push(`${provider}: latest campaign sync status is ${latestCampaignRun.status}`);
     }
     if (age > maxSyncAgeMinutes) {
       failures.push(`${provider}: latest campaign sync is stale (${age.toFixed(1)} min > ${maxSyncAgeMinutes} min)`);
     }
-    if (latestCampaignRun.range_to && latestCampaignRun.range_to < date) {
-      failures.push(`${provider}: latest campaign sync range_to ${latestCampaignRun.range_to} is before monitored date ${date}`);
+    if (runForCompleteness.range_to && runForCompleteness.range_to < date) {
+      failures.push(`${provider}: latest successful campaign sync range_to ${runForCompleteness.range_to} is before monitored date ${date}`);
     }
-    if (requireRowsUpserted && toNumber(latestCampaignRun.rows_upserted) <= 0) {
-      failures.push(`${provider}: latest campaign sync upserted no rows`);
+    if (requireRowsUpserted && !latestRunIsActive && toNumber(latestCampaignRun.rows_upserted) <= 0) {
+      failures.push(`${provider}: latest finished campaign sync upserted no rows`);
     }
   }
 

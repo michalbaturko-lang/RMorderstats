@@ -10,8 +10,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-
-const CURRENCY_RATES = { CZK: 1, EUR: 25.2, HUF: 0.063, RON: 5.1 };
+import { getCurrencyRateToCzk } from './currencyRates';
+import { getOrderLineItems, getLineBuyPriceWithoutVat, getLineQuantity, getLineRevenueWithoutVat } from './orderLineItems';
 const MARKET_LABELS = {
   all: 'Všechny země',
   cz: 'Česko',
@@ -50,7 +50,7 @@ const parseDateFromInput = (value) => {
 
 const formatShortDate = (date) => date.toLocaleDateString('cs-CZ', { day: '2-digit', month: '2-digit' });
 const formatFullDate = (date) => date.toLocaleDateString('cs-CZ', { day: '2-digit', month: '2-digit', year: 'numeric' });
-const getOrderCurrency = (order) => order.currency || order.raw_data?.currency_id || 'CZK';
+const getOrderCurrency = (order) => order.currency || order.raw_data?.currency_id || order.raw_data?.currency?.code || order.raw_data?.currency || 'CZK';
 const getOrderMarket = (order) => (order.market || order.raw_data?.language_id || 'unknown').toLowerCase();
 const getOrderNumber = (order) => order.order_number || order.raw_data?.order_number || order.raw_data?.number || order.id;
 
@@ -77,9 +77,9 @@ const finalizeBucket = (bucket) => ({
 });
 
 const calculateOrderMargin = (order) => {
-  const products = Array.isArray(order.raw_data?.products) ? order.raw_data.products : [];
+  const products = getOrderLineItems(order, { allowRawFallback: false });
   const currency = getOrderCurrency(order);
-  const rate = CURRENCY_RATES[currency] || 1;
+  const rate = getCurrencyRateToCzk(currency);
   const shippingRevenue = toNumber(order.raw_data?.shipment?.price_without_vat) * rate;
 
   let revenueNative = 0;
@@ -87,9 +87,9 @@ const calculateOrderMargin = (order) => {
   let missingItems = 0;
 
   products.forEach((product) => {
-    const quantity = toNumber(product.quantity) || 1;
-    const buyPrice = toNumber(product.buy_price);
-    revenueNative += toNumber(product.price_without_vat);
+    const quantity = getLineQuantity(product);
+    const buyPrice = getLineBuyPriceWithoutVat(product);
+    revenueNative += getLineRevenueWithoutVat(product);
 
     if (buyPrice > 0) {
       costNative += buyPrice * quantity;
@@ -171,7 +171,7 @@ const MarginKPI = ({ title, value, sub, tone = 'slate' }) => {
   );
 };
 
-export default function MarginModule({ orders, dateFrom, dateTo, country }) {
+export default function MarginModule({ orders, dateFrom, dateTo, country, qualityWarning = '' }) {
   const stats = useMemo(() => {
     const from = parseDateFromInput(dateFrom);
     const to = parseDateFromInput(dateTo);
@@ -288,6 +288,12 @@ export default function MarginModule({ orders, dateFrom, dateTo, country }) {
           Hrubý zisk % = (zboží bez DPH - nákupka) / zboží bez DPH
         </div>
       </div>
+
+      {qualityWarning && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 mb-4 text-sm text-amber-900">
+          <span className="font-semibold">Kvalita dat:</span> {qualityWarning}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
         <MarginKPI

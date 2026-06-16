@@ -1,0 +1,474 @@
+{
+  "version": 1,
+  "updated_at": "2026-05-27",
+  "playbooks": [
+    {
+      "id": "daily_briefing",
+      "title": "Denní briefing",
+      "required_tools": [
+        "get_orders_summary",
+        "get_margin_breakdown",
+        "compare_periods",
+        "get_ads_spend",
+        "get_ads_landing_pages",
+        "get_relevant_memories"
+      ],
+      "steps": [
+        "Vytáhnout stručný souhrn objednávek, obratu, AOV, marže a spendu.",
+        "Porovnat to proti předchozímu stejně dlouhému období, pokud je to levné a dostupné.",
+        "Najít první watchout: AOV, marže, PNO, top SKU nebo landing pages.",
+        "Přiznat missing data a neoznačovat briefing za finální audit.",
+        "Navrhnout první věc, kterou by měl majitel firmy řešit jako první."
+      ],
+      "must_not_skip": ["summary_metrics", "period_comparison_or_disclosure", "watchout", "next_focus"],
+      "typical_missing_data": ["landing pages", "čerstvost spend syncu", "schválený týmový kontext"]
+    },
+    {
+      "id": "capabilities_overview",
+      "title": "Co umím a k jakým datům mám přístup",
+      "required_tools": [
+        "get_data_freshness",
+        "get_known_contexts"
+      ],
+      "steps": [
+        "Vypsat hlavní zdroje dat, ke kterým má agent přístup.",
+        "U každého zdroje stručně říct, co z něj umí zjistit.",
+        "U každého zdroje přiznat hlavní limit nebo podmínku čerstvosti.",
+        "Připomenout read-only guardrail a že bez evidence nesmí tvrdit víc.",
+        "Navrhnout, jaký konkrétní business dotaz má smysl řešit jako další."
+      ],
+      "must_not_skip": ["source_inventory", "known_limits", "freshness_disclosure", "read_only_guardrail"],
+      "typical_missing_data": ["čerstvost konkrétního syncu", "nepřipojený Meta zdroj", "neaktuální Matrix scrape"]
+    },
+    {
+      "id": "knowledge_review",
+      "title": "Knowledge review",
+      "required_tools": [
+        "get_known_contexts",
+        "get_relevant_memories",
+        "get_relevant_examples",
+        "get_data_freshness"
+      ],
+      "steps": [
+        "Ukázat nejdůležitější business pravdy, heuristiky a produktové teze, které má Pokec aktuálně nahrané.",
+        "Oddělit schválené znalosti od otevřených otázek a chybějících oblastí.",
+        "Nehrát si na diagnostiku jedné metriky; toto je schvalovací mód nad knowledge layer.",
+        "Připomenout, že rozdíl mezi znalostí a realitou se má opravit v knowledge layer dřív než v interpretaci.",
+        "Navrhnout, které body mají jít jako první na lidské odsouhlasení."
+      ],
+      "must_not_skip": ["approved_truths", "open_questions", "knowledge_boundary", "next_review_step"],
+      "typical_missing_data": ["meeting notes", "schválené examples", "live storefront walkthrough refresh"]
+    },
+    {
+      "id": "trusted_best_practices",
+      "title": "Důvěryhodné best practices pro CRO / Google Ads / Meta",
+      "required_tools": [
+        "get_known_contexts",
+        "get_relevant_examples",
+        "get_meeting_notes",
+        "get_experiments",
+        "get_data_freshness"
+      ],
+      "steps": [
+        "Vypsat trusted doctrine jen z oficiálních nebo výzkumných zdrojů.",
+        "Oddělit obecné platform doporučení od toho, co je prokázané u Regal Master.",
+        "Přiznat, kde chybí lokální validace přes data nebo browser kontrolu.",
+        "Napojit doctrine na konkrétní business trade-off Regal Masteru: obrat, AOV, marže, B2B kvalita, sklad.",
+        "Navrhnout další lokální ověření nebo test místo univerzální rady."
+      ],
+      "must_not_skip": ["source_tiering", "evidence_boundary", "read_only_guardrail", "missing_data_disclosure", "next_unblock_step"],
+      "typical_missing_data": ["lokální validace na Regal datech", "čerstvost Meta vrstvy", "browser kontrola konkrétní landing page"]
+    },
+    {
+      "id": "assortment_strategy",
+      "title": "Sortiment a pricing strategy",
+      "required_tools": [
+        "get_product_mix",
+        "get_margin_breakdown",
+        "get_bundle_analysis",
+        "get_missing_buy_prices",
+        "compare_periods",
+        "get_known_contexts"
+      ],
+      "steps": [
+        "Oddělit traffic-driver SKU od margin-driver a B2B-candidate rodin.",
+        "Číst sortiment přes rodinu, rozměr, výškové laddery, finish a pack-size, ne jen přes top sales řádek.",
+        "Zohlednit stock-out caveat u vyšších a prémiovějších rodin.",
+        "Oddělit bundle leverage od levných vstupních SKU.",
+        "Navrhnout, které rodiny mají smysl tlačit v kampaních, merchandisingu nebo pricingu."
+      ],
+      "must_not_skip": ["product_mix", "margin_link", "bundle_separation", "missing_data_disclosure", "next_step"],
+      "typical_missing_data": ["skutečná poptávka u out-of-stock rodin", "shelf-level stock exposure by market", "merchant-validace nových rodin full metal / double layer"]
+    },
+    {
+      "id": "storefront_walkthrough",
+      "title": "Shop walkthrough memory",
+      "required_tools": [
+        "get_known_contexts",
+        "get_ads_landing_pages",
+        "get_small_ga_landing_pages",
+        "get_data_freshness"
+      ],
+      "steps": [
+        "Vypsat jen potvrzené storefront signály, které mají screenshot, browser, walkthrough nebo jinou vizuální evidenci.",
+        "Oddělit storefront merchandising od datové business příčiny.",
+        "Přiznat, když je storefront memory neúplná nebo zastaralá.",
+        "Navázat storefront signály na landing pages, AOV, mix a bundle chování.",
+        "Připomenout, že rozdíl v sortimentu mezi 4 shopy je spíš provozní alarm než market-specific assortment strategie."
+      ],
+      "must_not_skip": ["visual_evidence_boundary", "storefront_vs_causality", "assortment_parity_guardrail", "missing_data_disclosure"],
+      "typical_missing_data": ["fresh homepage screenshots", "fresh category screenshots", "fresh PDP walkthrough by market"]
+    },
+    {
+      "id": "shipping_revenue",
+      "title": "Tržba z poštovného a doběrečného",
+      "required_tools": [
+        "get_orders_summary",
+        "get_shipping_revenue",
+        "compare_periods"
+      ],
+      "steps": [
+        "Oddělit poštovné od obratu zboží a explicitně to říct.",
+        "Vypsat poštovné po dnech a podle zemí.",
+        "Porovnat ho proti referenčnímu období, pokud je dostupné.",
+        "Nepřimíchávat poštovné do PNO ani do obratu zboží.",
+        "Navrhnout další ověření jen pokud se poštovné opravdu mění nečekaně."
+      ],
+      "must_not_skip": ["shipping_separation", "daily_breakdown", "market_breakdown", "period_comparison_or_disclosure"],
+      "typical_missing_data": ["referenční období", "rozpad podle dopravce", "samostatný signál pro doběrku"]
+    },
+    {
+      "id": "aov_drop",
+      "title": "Pokles AOV",
+      "required_tools": [
+        "get_orders_summary",
+        "get_product_mix",
+        "get_bundle_analysis",
+        "get_ads_spend",
+        "get_ads_campaigns",
+        "get_ads_landing_pages",
+        "get_small_ga_landing_pages",
+        "compare_periods",
+        "get_relevant_memories"
+      ],
+      "steps": [
+        "Ověřit, zda nejde o datovou chybu nebo neúspěšné platby.",
+        "Porovnat AOV po zemích proti referenčnímu období.",
+        "Rozložit objednávky podle cenových bucketů a počtu kusů.",
+        "Najít SKU, která nejvíc změnila produktový mix.",
+        "Oddělit balíčky od jednotlivých produktů.",
+        "Zkontrolovat B2B/B2C signál.",
+        "Zkontrolovat Google Ads kampaně a landing pages.",
+        "Zkontrolovat malou GA: paid i organic landing pages.",
+        "Zkontrolovat konkurenci, pokud jsou data čerstvá.",
+        "Oddělit fakta, hypotézy a chybějící data."
+      ],
+      "must_not_skip": ["product_mix", "landing_pages", "period_comparison", "missing_data_disclosure"],
+      "typical_missing_data": ["organic landing page mix", "aktuální Matrix scrape", "Meta attribution"]
+    },
+    {
+      "id": "margin_drop",
+      "title": "Pokles marže",
+      "required_tools": [
+        "get_margin_breakdown",
+        "get_product_mix",
+        "get_bundle_analysis",
+        "get_missing_buy_prices",
+        "get_ads_spend",
+        "compare_periods",
+        "get_relevant_memories"
+      ],
+      "steps": [
+        "Ověřit vzorec marže.",
+        "Vyloučit STORNO a Platba selhala.",
+        "Vypsat přesné a neúplné objednávky.",
+        "Najít low-margin SKU a jejich dopad.",
+        "Oddělit balíčky, akce a nově prodávané produkty.",
+        "Porovnat proti referenčnímu období.",
+        "Zkontrolovat, zda Ads netlačí low-margin SKU.",
+        "Navrhnout konkrétní zásah nebo další ověření."
+      ],
+      "must_not_skip": ["failed_payments", "missing_buy_prices", "sample_size", "sku_mix"]
+    },
+    {
+      "id": "high_pno",
+      "title": "Vysoké PNO",
+      "required_tools": [
+        "get_data_freshness",
+        "get_ads_spend",
+        "get_ads_campaigns",
+        "get_meta_spend",
+        "get_small_ga_sessions",
+        "get_small_ga_funnel",
+        "get_small_ga_landing_pages",
+        "get_orders_summary",
+        "get_margin_breakdown",
+        "compare_periods"
+      ],
+      "steps": [
+        "Ověřit čerstvost spend syncu.",
+        "Porovnat real tržby proti Ads spendu.",
+        "Rozdělit PNO podle zemí a providerů.",
+        "Najít kampaně se spendem bez objednávek.",
+        "Oddělit traffic quality od landing quality přes small GA funnel a landing pages.",
+        "Porovnat platformní ROAS a real ROAS.",
+        "Zkontrolovat maržový strop: spend / hrubý zisk.",
+        "Navrhnout, co zkontrolovat v účtech bez mutací."
+      ],
+      "must_not_skip": ["data_freshness", "real_revenue", "provider_split", "read_only_warning"]
+    },
+    {
+      "id": "order_drop_intraday",
+      "title": "Propad objednavek behem dne",
+      "required_tools": [
+        "get_orders_summary",
+        "compare_periods",
+        "get_small_ga_sessions",
+        "get_small_ga_funnel",
+        "get_data_freshness"
+      ],
+      "steps": [
+        "Rozlozit objednavky po hodinach a najit slabe useky dne.",
+        "Porovnat intraday pattern s referencnim obdobim.",
+        "Oddelit propad trafficu od propadu konverze, pokud je k dispozici mala GA.",
+        "Zkontrolovat cerstvost Ads a small GA dat.",
+        "Navrhnout dalsi overeni bez mutaci v kampanich."
+      ],
+      "must_not_skip": ["hourly_breakdown", "period_comparison", "traffic_vs_conversion", "freshness"]
+    },
+    {
+      "id": "product_mix_change",
+      "title": "Zmena produktoveho mixu",
+      "required_tools": [
+        "get_product_mix",
+        "compare_periods",
+        "get_margin_breakdown",
+        "get_bundle_analysis"
+      ],
+      "steps": [
+        "Najit SKU s nejvetsim posunem podilu na trzbe.",
+        "Oddelit mixovou zmenu od celkoveho poklesu/pustu poptavky.",
+        "Zkontrolovat dopad na AOV i marzi.",
+        "Oddelit balicky od beznych SKU.",
+        "Vyhodnotit, jestli jsou zmeny lokalni jen pro cast trhu."
+      ],
+      "must_not_skip": ["share_shift", "period_comparison", "margin_link", "bundle_separation"]
+    },
+    {
+      "id": "campaign_mix_change",
+      "title": "Zmena kampanoveho mixu",
+      "required_tools": [
+        "get_ads_spend",
+        "get_ads_campaigns",
+        "compare_periods",
+        "get_data_freshness",
+        "get_ads_landing_pages",
+        "get_small_ga_sessions",
+        "get_small_ga_funnel",
+        "get_small_ga_landing_pages"
+      ],
+      "steps": [
+        "Porovnat spend share mezi typy kampani v obou obdobich.",
+        "Najit nejvetsi posun search vs shopping vs ostatni.",
+        "Zkontrolovat, zda se s mixem meni landing pages a small GA funnel kvalita.",
+        "Nenazyvat to zmenou cilovky bez dalsi evidence.",
+        "Navrhnout dalsi business overeni proti objednavkam."
+      ],
+      "must_not_skip": ["campaign_share_shift", "period_comparison", "landing_page_link", "uncertainty"]
+    },
+    {
+      "id": "campaign_performance",
+      "title": "Vykon kampani",
+      "required_tools": [
+        "get_data_freshness",
+        "get_ads_campaigns",
+        "get_meta_campaigns",
+        "get_small_ga_funnel"
+      ],
+      "steps": [
+        "Oddelit platform conversion value od real revenue a rict to nahlas.",
+        "Najit kampan s nejvyssi platform conversion value.",
+        "Najit kampan s nejlepsi small GA purchase rate, pokud je dost sessions.",
+        "Kde to jde, pridat i best-effort commercial signal z matched purchase value nebo cart value.",
+        "Porovnat Google a Meta vedle sebe bez slepovani metrik.",
+        "Priznat, kdy chybi autoritativni order-to-campaign attribution join."
+      ],
+      "must_not_skip": ["platform_value_vs_real_revenue", "small_ga_purchase_rate", "provider_split", "uncertainty"]
+    },
+    {
+      "id": "country_change",
+      "title": "Zmena v konkretni zemi",
+      "required_tools": [
+        "get_orders_summary",
+        "get_margin_breakdown",
+        "get_ads_spend",
+        "compare_periods",
+        "get_relevant_memories"
+      ],
+      "steps": [
+        "Spojit vybranou zemi s AOV, marzi, B2B podilem a objednavkami.",
+        "Porovnat zmenu proti referencnimu obdobi i proti ostatnim trhum.",
+        "Zkontrolovat, zda nejde jen o lokalni kampanovy nebo landing page efekt.",
+        "Oddelit to, co je specificke pro jeden trh, od globalniho trendu.",
+        "Navrhnout dalsi krok pro tuto zemi."
+      ],
+      "must_not_skip": ["market_comparison", "period_comparison", "country_specificity", "next_step"]
+    },
+    {
+      "id": "bundle_diagnostics",
+      "title": "Balíčky a multi-pack produkty",
+      "required_tools": [
+        "get_bundle_analysis",
+        "get_margin_breakdown",
+        "get_product_mix",
+        "compare_periods"
+      ],
+      "steps": [
+        "Definovat pravidlo detekce balíčků.",
+        "Spočítat balíčky po dnech.",
+        "Rozdělit podle SKU a rozměru.",
+        "Spočítat tržbu, nákupku a hrubý zisk.",
+        "Porovnat s běžnými SKU a referenčním obdobím.",
+        "Vyhodnotit dopad na AOV i marži."
+      ],
+      "must_not_skip": ["bundle_detection_rule", "sku_breakdown", "margin_pct"]
+    },
+    {
+      "id": "landing_page_problem",
+      "title": "Landing page problém",
+      "required_tools": [
+        "get_ads_landing_pages",
+        "get_small_ga_landing_pages",
+        "get_product_mix",
+        "get_ads_campaigns",
+        "compare_periods"
+      ],
+      "steps": [
+        "Oddělit Ads landing pages od malé GA landing pages.",
+        "Porovnat paid a organic landing page mix.",
+        "Rozdělit landing pages na HP, kategorii, produkt detail a ostatní.",
+        "Najít stránky, které vodí na levné/low-margin produkty.",
+        "Pokud je potřeba vizuální tvrzení, vyžádat screenshot/browser kontrolu.",
+        "Navrhnout test: řazení, hero, balíčky, B2B argumentace nebo jiné cílení."
+      ],
+      "must_not_skip": ["source_separation", "visual_claim_guardrail", "period_comparison"]
+    },
+    {
+      "id": "competitor_change",
+      "title": "Konkurence",
+      "required_tools": [
+        "get_competitor_changes",
+        "get_product_mix",
+        "get_ads_campaigns",
+        "compare_periods"
+      ],
+      "steps": [
+        "Ověřit datum posledního Matrix scrape.",
+        "Najít změny cen, dostupnosti a sortimentu.",
+        "Spojit konkurenční změny s naším produktovým mixem.",
+        "Oddělit jistá fakta od hypotéz o dopadu.",
+        "Navrhnout reakci nebo další monitoring."
+      ],
+      "must_not_skip": ["last_scraped_at", "evidence", "uncertainty"]
+    },
+    {
+      "id": "import_logistics_overview",
+      "title": "Importní logistika: objednávky na cestě",
+      "required_tools": [
+        "get_import_orders_on_the_way",
+        "get_import_document_coverage",
+        "get_import_match_gaps"
+      ],
+      "steps": [
+        "Vypsat jen aktuální importní objednávky na cestě, ne historické naskladněné zásoby.",
+        "Normalizovat source sheet Čína 0526 jako business objednávku Čína 13.",
+        "Ukázat order, supplier, status, kontejnery, způsob naložení/paletování, ETA port/Brno, kusy, match % a risk count.",
+        "Vždy uvést coverage: chybějící ceny, KN/freight faktury, dokumenty, match review a neznámé množství u Čína 13.",
+        "Nepřepisovat statusy ani neopravovat data; Pokec je v této verzi read-only."
+      ],
+      "must_not_skip": ["import_orders_on_the_way", "coverage_warnings", "document_coverage", "read_only_guardrail"],
+      "typical_missing_data": ["missing prices", "KN/freight invoice", "packing list", "container loading photos", "ambiguous matches", "Čína 13 unknown quantity"]
+    },
+    {
+      "id": "stockout_risk",
+      "title": "Riziko výpadku proti inboundu",
+      "required_tools": [
+        "get_inbound_stock_risk",
+        "get_import_orders_on_the_way"
+      ],
+      "steps": [
+        "Použít aktuální Upgates stock, potvrzený inbound a business-clean order_items velocity.",
+        "Velocity ukázat v oknech 7, 14 a 30 dní globálně i po trzích CZ/SK/HU/RO, pokud je dostupná.",
+        "Použít forecast s +20 % meziměsíčním růstem.",
+        "Rizika řadit podle nejbližšího forecast stockout date a zvýraznit stockout před inbound ETA.",
+        "Pokud chybí stock, inbound, velocity nebo množství, říct podle dostupných dat a netvrdit jistý výpadek."
+      ],
+      "must_not_skip": ["stock_velocity", "forecast_growth", "import_coverage", "missing_data_disclosure"],
+      "typical_missing_data": ["missing stock", "missing velocity", "unknown inbound quantity", "unknown ETA"]
+    },
+    {
+      "id": "inbound_eta",
+      "title": "ETA importů a kontejnerů",
+      "required_tools": [
+        "get_import_orders_on_the_way",
+        "get_import_order_detail"
+      ],
+      "steps": [
+        "Najít importní objednávku podle business názvu Čína 9/10/11/12/13 nebo převést Čína 0526 na Čína 13.",
+        "Vypsat ETA port, ETA Brno, shipped date, kontejnery, způsob naložení/paletování a shipments.",
+        "U detailu ukázat řádky, match, qty, sklad, inbound, current Upgates NC, import cost a landed cost.",
+        "Upozornit na chybějící ceny, dokumenty, freight cost a neznámé množství.",
+        "Neodhadovat ETA ani množství mimo live data."
+      ],
+      "must_not_skip": ["inbound_orders", "container_loading", "document_coverage", "coverage_warnings", "read_only_guardrail"],
+      "typical_missing_data": ["shipment ETA", "container number", "container loading photos", "supplier invoice", "KN invoice", "Čína 13 quantity"]
+    },
+    {
+      "id": "landed_cost_change",
+      "title": "Změna nákupky a landed cost",
+      "required_tools": [
+        "get_landed_cost_changes",
+        "get_import_document_coverage"
+      ],
+      "steps": [
+        "Oddělit current Upgates NC, import order unit cost a landed unit cost.",
+        "Freight/forwarder cost alokovat podle hodnoty produktu, ne naplocho na kus.",
+        "Ukázat absolute a percent delta jen tam, kde jsou nákupní cena i freight coverage dostatečné.",
+        "Výslovně říct, kde chybí importní cena, KN/freight faktura nebo freight cost.",
+        "Nepředstírat kompletní landed cost bez cen a freight dokumentů."
+      ],
+      "must_not_skip": ["landed_cost_components", "document_coverage", "coverage_warnings", "missing_data_disclosure"],
+      "typical_missing_data": ["import unit cost", "KN/freight invoice", "freight amount", "currency conversion"]
+    },
+    {
+      "id": "import_data_quality",
+      "title": "Kvalita importních dat",
+      "required_tools": [
+        "get_import_match_gaps",
+        "get_import_document_coverage",
+        "get_import_orders_on_the_way"
+      ],
+      "steps": [
+        "Vypsat unmatched a ambiguous importní řádky z Match review včetně kandidátů a důvodu.",
+        "Vypsat dokumentovou coverage po objednávkách: supplier invoice, packing list, KN invoice, BL/tracking.",
+        "Vypsat chybějící ceny a freight coverage bez tvrzení, že landed cost je kompletní.",
+        "Zvlášť upozornit na neznámé množství u Čína 13, pokud není doplněné.",
+        "Navrhnout odblokování mimo Pokec; tento playbook je read-only."
+      ],
+      "must_not_skip": ["match_review", "document_coverage", "coverage_warnings", "read_only_guardrail"],
+      "typical_missing_data": ["unmatched lines", "ambiguous matches", "missing documents", "missing prices", "missing freight cost"]
+    },
+    {
+      "id": "missing_data",
+      "title": "Chybějící nebo slabá data",
+      "required_tools": ["get_data_freshness", "get_missing_buy_prices", "get_known_contexts"],
+      "steps": [
+        "Vypsat, která data chybí nebo jsou stará.",
+        "Vysvětlit, jak to omezuje jistotu odpovědi.",
+        "Navrhnout konkrétní krok pro odblokování.",
+        "Nedělat pevný závěr, pokud chybí rozhodující důkaz."
+      ],
+      "must_not_skip": ["missing_data_disclosure", "next_unblock_step"]
+    }
+  ]
+}

@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import { isExcludedBusinessOrder } from './businessOrderStatus';
+import { getCurrencyRateToCzk } from './currencyRates';
 
 const genId = () => Math.random().toString(36).substr(2, 9);
 
@@ -27,14 +29,12 @@ const BANK_SOURCES = [
 const formatNum = (num) => Math.round(num).toLocaleString('cs-CZ');
 const formatCZK = (num) => `${formatNum(num)} Kč`;
 
-const CURRENCY_RATES = { CZK: 1, EUR: 25.2, HUF: 0.063, RON: 5.1 };
-
 const getRevenueWithoutVAT = (order) => {
   const products = order.raw_data?.products || [];
   let total = 0;
   products.forEach(p => { total += parseFloat(p.price_without_vat || 0); });
   const currency = order.currency || 'CZK';
-  return total * (CURRENCY_RATES[currency] || 1);
+  return total * getCurrencyRateToCzk(currency);
 };
 
 // Ads-related keywords to auto-flag in bank items
@@ -810,9 +810,7 @@ export default function FinanceModule({ supabaseUrl, supabaseKey, userEmail }) {
         const key = o.raw_data?.order_number || o.id;
         if (seen.has(key)) return false;
         seen.add(key);
-        const s1 = (o.status || '').toUpperCase();
-        const s2 = (o.raw_data?.status || '').toUpperCase();
-        return s1 !== 'STORNO' && s2 !== 'STORNO';
+        return !isExcludedBusinessOrder(o);
       });
     }
 

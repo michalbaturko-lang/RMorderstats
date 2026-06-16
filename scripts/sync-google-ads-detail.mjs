@@ -41,6 +41,7 @@ import {
   startSyncRun,
   upsertSupabaseRows,
 } from './lib/ads-sync-utils.mjs';
+import { pathToFileURL } from 'node:url';
 
 const PROVIDER = 'google_ads';
 const REQUIRED_ENV_VARS = [
@@ -754,7 +755,7 @@ function rawInsightRow({ row, account, level, fetchedAt }) {
   };
 }
 
-async function main() {
+export async function runGoogleAdsDetailSync() {
   for (const name of REQUIRED_ENV_VARS) requireEnv(name);
 
   const apiVersion = process.env.GOOGLE_ADS_API_VERSION || 'v23';
@@ -919,7 +920,13 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error('[sync-google-ads-detail] FAILED:', error.message);
-  process.exit(1);
-});
+function isDirectRun() {
+  return Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
+}
+
+if (isDirectRun()) {
+  runGoogleAdsDetailSync().catch((error) => {
+    console.error('[sync-google-ads-detail] FAILED:', error.message);
+    process.exit(1);
+  });
+}

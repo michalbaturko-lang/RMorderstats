@@ -10,6 +10,9 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { getCurrencyRateToCzk } from './currencyRates';
+import { getOrderLineItems, getLineBuyPriceWithoutVat, getLineQuantity, getLineRevenueWithoutVat } from './orderLineItems';
+import { isExcludedBusinessOrder } from './businessOrderStatus';
 
 const PROVIDER_LABELS = {
   google_ads: 'Google Ads',
@@ -23,8 +26,6 @@ const MARKET_LABELS = {
   ro: 'RO',
   unknown: 'Neznámé',
 };
-
-const CURRENCY_RATES = { CZK: 1, EUR: 25.2, HUF: 0.063, RON: 5.1 };
 
 const LEVEL_LABELS = {
   device: 'Zařízení',
@@ -187,7 +188,7 @@ const enrichMetrics = (metrics) => ({
   costPerConversion: metrics.conversions ? metrics.spend / metrics.conversions : 0,
 });
 
-const getOrderCurrency = (order) => order.currency || order.raw_data?.currency_id || 'CZK';
+const getOrderCurrency = (order) => order.currency || order.raw_data?.currency_id || order.raw_data?.currency?.code || order.raw_data?.currency || 'CZK';
 const getOrderMarket = (order) => (order.market || order.raw_data?.language_id || 'unknown').toLowerCase();
 const getOrderDateKey = (order) => String(order.order_date || order.created_at || '').slice(0, 10);
 const getOrderHour = (order) => {
@@ -197,16 +198,16 @@ const getOrderHour = (order) => {
 };
 
 function addOrderMetrics(target, order) {
-  const products = Array.isArray(order.raw_data?.products) ? order.raw_data.products : [];
-  const rate = CURRENCY_RATES[getOrderCurrency(order)] || 1;
+  const products = getOrderLineItems(order, { allowRawFallback: false });
+  const rate = getCurrencyRateToCzk(getOrderCurrency(order));
   let revenue = 0;
   let cost = 0;
   let missingItems = 0;
 
   for (const product of products) {
-    const quantity = Math.max(toNumber(product.quantity), 1);
-    const buyPrice = toNumber(product.buy_price);
-    revenue += toNumber(product.price_without_vat);
+    const quantity = Math.max(getLineQuantity(product), 1);
+    const buyPrice = getLineBuyPriceWithoutVat(product);
+    revenue += getLineRevenueWithoutVat(product);
     if (buyPrice > 0) {
       cost += buyPrice * quantity;
     } else {
@@ -241,11 +242,7 @@ function deduplicateOrders(orders) {
 }
 
 function filterCancelledOrders(orders) {
-  return orders.filter((order) => {
-    const topStatus = String(order.status || '').toUpperCase();
-    const rawStatus = String(order.raw_data?.status || '').toUpperCase();
-    return topStatus !== 'STORNO' && rawStatus !== 'STORNO';
-  });
+  return orders.filter((order) => !isExcludedBusinessOrder(order));
 }
 
 function cleanOrders(orders, country = 'all') {
@@ -2689,14 +2686,20 @@ function ProviderCoverageCard({ row }) {
   );
 }
 
-function BusinessSourceCard({ state }) {
+function BusinessSourceCard({ state, useForMargin }) {
   const status = state?.status || 'fallback';
-  const tone = status === 'loaded'
+  const tone = status === 'loaded' && useForMargin
     ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+    : status === 'loaded'
+      ? 'border-amber-200 bg-amber-50 text-amber-900'
     : status === 'error'
       ? 'border-amber-200 bg-amber-50 text-amber-900'
       : 'border-blue-200 bg-blue-50 text-blue-900';
-  const label = status === 'loaded' ? 'VIEWS OK' : status === 'error' ? 'FALLBACK' : 'FALLBACK';
+  const label = status === 'loaded'
+    ? (useForMargin ? 'VIEWS OK' : 'VIEWS READY')
+    : status === 'error'
+      ? 'FALLBACK'
+      : 'FALLBACK';
 
   return (
     <div className={`rounded-lg border p-3 ${tone}`}>
@@ -2704,17 +2707,19 @@ function BusinessSourceCard({ state }) {
         <div className="text-sm font-bold">Business metriky</div>
         <StatusBadge value={label} />
       </div>
-      <div className="mt-2 text-2xl font-bold">{status === 'loaded' ? 'Supabase' : 'React'}</div>
+      <div className="mt-2 text-2xl font-bold">{status === 'loaded' ? (useForMargin ? 'Supabase' : 'Hybrid') : 'React'}</div>
       <div className="mt-1 text-xs leading-relaxed opacity-80">
         {status === 'loaded'
-          ? `${formatNumber(state.totalRows)} denních a ${formatNumber(state.providerRows)} provider řádků z business views.`
+          ? useForMargin
+            ? `${formatNumber(state.totalRows)} denních a ${formatNumber(state.providerRows)} provider řádků z business views.`
+            : `${formatNumber(state.totalRows)} denních a ${formatNumber(state.providerRows)} provider řádků z business views je načtených, ale margin-driven ekonomika v UI zatím běží z lokální exact agregace objednávek.`
           : state?.message || 'Počítá se z objednávek načtených pro aktuální filtr; po aplikaci SQL views se přepne na Supabase.'}
       </div>
     </div>
   );
 }
 
-function ReadinessBlockers({ providerCoverage, businessViewState, exactShare }) {
+function ReadinessBlockers({ providerCoverage, businessViewState, exactShare, useBusinessViewsForMargin }) {
   const blockers = [];
   const meta = providerCoverage.find((row) => row.provider === 'meta_ads');
   const google = providerCoverage.find((row) => row.provider === 'google_ads');
@@ -2727,8 +2732,13 @@ function ReadinessBlockers({ providerCoverage, businessViewState, exactShare }) 
   }
   if (businessViewState.status !== 'loaded') {
     blockers.push({
-      title: 'Business views nejsou aplikované v Supabase',
-      detail: 'Dashboard počítá tržby, PNO a zisk po Ads fallbackem v prohlížeči; po doplnění SUPABASE_DB_URL se přepne na Supabase views.',
+      title: 'Business views nejsou zapojené v této větvi dashboardu',
+      detail: 'Není to blocker pro Ads sync ani Meta data. Jen část business metrik běží fallbackem v prohlížeči místo přes serverové Supabase views.',
+    });
+  } else if (!useBusinessViewsForMargin) {
+    blockers.push({
+      title: 'Business views jsou načtené, ale ještě nejsou autoritativní pro marži po Ads',
+      detail: 'UI zatím drží lokální exact agregaci objednávek, dokud nebude live SQL business vrstva plně sladěná s maržovým auditem a excluded statuses.',
     });
   }
   if (google?.hasData && !google?.hasDeepDetail) {
@@ -2777,7 +2787,7 @@ function ReadinessBlockers({ providerCoverage, businessViewState, exactShare }) 
   );
 }
 
-function DataReadinessPanel({ providerCoverage, detailCoverage, orderTotal, businessViewState }) {
+function DataReadinessPanel({ providerCoverage, detailCoverage, orderTotal, businessViewState, useBusinessViewsForMargin }) {
   const exactShare = orderTotal.orders ? (orderTotal.exactOrders / orderTotal.orders) * 100 : 0;
   const activeDetails = detailCoverage.filter((row) => row.rows > 0);
 
@@ -2791,7 +2801,7 @@ function DataReadinessPanel({ providerCoverage, detailCoverage, orderTotal, busi
         {providerCoverage.map((row) => (
           <ProviderCoverageCard key={row.provider} row={row} />
         ))}
-        <BusinessSourceCard state={businessViewState} />
+        <BusinessSourceCard state={businessViewState} useForMargin={useBusinessViewsForMargin} />
         <div className={`rounded-lg border p-3 ${exactShare >= 95 ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
           <div className="flex items-center justify-between gap-3">
             <div className="text-sm font-bold">Maržová přesnost</div>
@@ -2808,6 +2818,7 @@ function DataReadinessPanel({ providerCoverage, detailCoverage, orderTotal, busi
         providerCoverage={providerCoverage}
         businessViewState={businessViewState}
         exactShare={exactShare}
+        useBusinessViewsForMargin={useBusinessViewsForMargin}
       />
       <div className="mt-3 flex flex-wrap gap-2">
         {detailCoverage.map((row) => (
@@ -3422,10 +3433,15 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
 
   const businessViewsLoaded = businessViewState.status === 'loaded';
   const businessViewsHaveRows = businessViewsLoaded && businessDailyRows.length > 0;
+  // Safety switch: business views are available, but margin-driven Ads
+  // economics stays on the same exact order aggregation as the Marže tab
+  // until the live SQL business layer is fully reconciled with the current
+  // margin audit and excluded-status rules.
+  const useBusinessViewsForMargin = false;
   const localOrderTotal = useMemo(() => aggregateOrders(orders), [orders]);
   const previousOrderTotal = useMemo(() => aggregateOrders(previousOrders), [previousOrders]);
   const businessOrderTotal = useMemo(() => orderMetricsFromBusinessRows(businessDailyRows), [businessDailyRows]);
-  const orderTotal = businessViewsHaveRows ? businessOrderTotal : localOrderTotal;
+  const orderTotal = useBusinessViewsForMargin && businessViewsHaveRows ? businessOrderTotal : localOrderTotal;
   const orderByDate = useMemo(() => aggregateOrdersByDate(orders), [orders]);
   const orderByMarket = useMemo(() => aggregateOrdersByMarket(orders), [orders]);
   const total = useMemo(() => metricSummary(dailyRows), [dailyRows]);
@@ -3442,14 +3458,14 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
     spendToGrossProfit: orderTotal.exactGrossProfit ? (total.spend / orderTotal.exactGrossProfit) * 100 : 0,
   }), [orderTotal, total]);
   const daily = useMemo(
-    () => (businessViewsHaveRows ? aggregateDailyFromBusinessRows(businessDailyRows) : aggregateDaily(dailyRows, orderByDate)),
-    [businessViewsHaveRows, businessDailyRows, dailyRows, orderByDate]
+    () => (useBusinessViewsForMargin && businessViewsHaveRows ? aggregateDailyFromBusinessRows(businessDailyRows) : aggregateDaily(dailyRows, orderByDate)),
+    [useBusinessViewsForMargin, businessViewsHaveRows, businessDailyRows, dailyRows, orderByDate]
   );
   const markets = useMemo(
-    () => (businessViewsLoaded && businessProviderRows.length
+    () => (useBusinessViewsForMargin && businessViewsLoaded && businessProviderRows.length
       ? aggregateMarketsFromBusinessRows(businessProviderRows, dateFrom, dateTo)
       : aggregateMarkets(dailyRows, orderByMarket, dateFrom, dateTo)),
-    [businessViewsLoaded, businessProviderRows, dailyRows, orderByMarket, dateFrom, dateTo]
+    [useBusinessViewsForMargin, businessViewsLoaded, businessProviderRows, dailyRows, orderByMarket, dateFrom, dateTo]
   );
   const campaigns = useMemo(() => aggregateCampaigns(campaignRows, campaignMeta), [campaignRows, campaignMeta]);
   const comparisonRange = useMemo(() => previousDateRange(dateFrom, dateTo), [dateFrom, dateTo]);
@@ -3660,6 +3676,7 @@ export default function AdsModule({ supabaseClient, dateFrom, dateTo, country, o
         detailCoverage={detailCoverage}
         orderTotal={orderTotal}
         businessViewState={businessViewState}
+        useBusinessViewsForMargin={useBusinessViewsForMargin}
       />
 
       <PeriodComparisonPanel comparison={periodComparison} />

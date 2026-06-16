@@ -1,0 +1,196 @@
+{
+  "version": 1,
+  "updated_at": "2026-05-27",
+  "sources": [
+    {
+      "id": "upgates_orders",
+      "label": "Upgates objednávky",
+      "system": "Upgates -> Supabase",
+      "tables_or_views": ["orders", "order_business_daily_summary"],
+      "freshness_requirement": "orders sync musí být čerstvý pro aktuální den; agent má vždy uvést, pokud čerstvost neověřil",
+      "can_answer": [
+        "objednávky podle země a dne",
+        "produktový mix",
+        "AOV bez DPH a bez poštovného",
+        "tržba z poštovného",
+        "stavy objednávek",
+        "B2B/B2C signály",
+        "marže podle nákupních cen"
+      ],
+      "known_limits": [
+        "chybějící buy_price snižuje přesnost marže",
+        "STORNO a Platba selhala se nesmí interpretovat jako real business objednávka"
+      ],
+      "allowed_operations": ["select"],
+      "mutation_allowed": false
+    },
+    {
+      "id": "google_ads",
+      "label": "Google Ads",
+      "system": "Google Ads API -> Supabase",
+      "tables_or_views": [
+        "ad_metrics_daily",
+        "ad_campaigns",
+        "ad_landing_pages_daily",
+        "marketing_business_daily_total",
+        "marketing_business_provider_daily_summary"
+      ],
+      "freshness_requirement": "campaign spend do 45 minut; deep detail denně; landing pages po detail syncu",
+      "can_answer": [
+        "spend podle země",
+        "PNO a real ROAS",
+        "kampaně",
+        "search terms",
+        "shopping produkty",
+        "landing pages",
+        "hodiny dne",
+        "zařízení",
+        "geo",
+        "conversion actions"
+      ],
+      "known_limits": [
+        "Google Ads data jsou read-only",
+        "platformní konverzní hodnota se může lišit od real tržeb z Upgates",
+        "deep detail může být pomalejší než campaign spend"
+      ],
+      "allowed_operations": ["select"],
+      "mutation_allowed": false
+    },
+    {
+      "id": "meta_ads",
+      "label": "Meta Ads",
+      "system": "Meta Marketing API -> Supabase",
+      "tables_or_views": ["ad_metrics_daily", "ad_campaigns", "marketing_business_provider_daily_summary"],
+      "freshness_requirement": "po doplnění tokenů musí agent ověřit poslední Meta sync před interpretací",
+      "can_answer": [
+        "spend podle země",
+        "kampaně",
+        "ad sets",
+        "ads",
+        "placements",
+        "audience",
+        "creative-level výkon",
+        "Meta vs Google srovnání"
+      ],
+      "known_limits": [
+        "Meta data nemusí být dostupná, dokud nejsou doplněné přístupy a sync",
+        "Meta Ads data jsou read-only"
+      ],
+      "allowed_operations": ["select"],
+      "mutation_allowed": false
+    },
+    {
+      "id": "small_ga",
+      "label": "Malá GA / vlastní analytika",
+      "system": "RM Smartlook / analytics tracker -> CORE Supabase",
+      "tables_or_views": ["sl_session_recordings", "sl_events", "sl_carts", "sl_purchases", "small_ga_*"],
+      "freshness_requirement": "agent musí ověřit, zda tracker a ingestion běží pro daný web a období",
+      "can_answer": [
+        "sessions",
+        "landing pages",
+        "source/medium/campaign",
+        "cart events",
+        "purchase events",
+        "checkout funnel (add_to_cart -> checkout -> purchase)",
+        "abandoned vs recovered carts",
+        "payment method mix",
+        "shipping method mix",
+        "HP vs kategorie vs produkt detail",
+        "organic vs paid landing pages"
+      ],
+      "known_limits": [
+        "pokud malá GA ještě není live pro daný web, agent nesmí tvrdit chování landing pages",
+        "vizuální vzhled landing page vyžaduje screenshot/browser kontrolu",
+        "carts/purchases vrstva může mít jinou read policy než sessions/events, takže agent musí přiznat, pokud ji neumí načíst"
+      ],
+      "allowed_operations": ["select"],
+      "mutation_allowed": false
+    },
+    {
+      "id": "matrix_competition",
+      "label": "Matrix konkurence",
+      "system": "matrix.regalmaster.cz",
+      "tables_or_views": ["competitor_*"],
+      "freshness_requirement": "každé konkurenční tvrzení musí uvést datum posledního scrape/ověření",
+      "can_answer": [
+        "konkurenční ceny",
+        "dostupnost",
+        "nové produkty",
+        "změny sortimentu",
+        "změny strategie podle země"
+      ],
+      "known_limits": [
+        "bez aktuálního scrape nesmí agent tvrdit, že konkurence něco změnila"
+      ],
+      "allowed_operations": ["select"],
+      "mutation_allowed": false
+    },
+    {
+      "id": "import_logistics",
+      "label": "Importní logistika",
+      "system": "Supabase import logistics + Upgates stock/purchase prices + business-clean orders",
+      "tables_or_views": [
+        "import_orders",
+        "import_order_lines",
+        "import_order_shipments",
+        "import_order_documents",
+        "import_order_costs",
+        "import_product_matches",
+        "upgates_product_purchase_prices_current",
+        "upgates_product_stock_current",
+        "import_logistics_order_overview",
+        "import_logistics_sku_risk",
+        "import_logistics_landed_cost_changes",
+        "import_logistics_match_gaps",
+        "import_logistics_document_coverage"
+      ],
+      "freshness_requirement": "agent musí číst live Supabase views a vždy uvést coverage cen, dokumentů, matchů, freight/KN faktur a neznámých množství",
+      "can_answer": [
+        "co je aktuálně na cestě",
+        "ETA Čína 9/10/11/12/13",
+        "aktuální sklad plus inbound",
+        "riziko stockoutu před inbound ETA",
+        "změna Upgates NC vs import cost vs landed cost",
+        "nespárované nebo ambiguous importní řádky",
+        "coverage dokumentů, invoice, packing list, KN faktur a BL/tracking",
+        "jak je zboží poskládané v kontejneru, včetně paletování a fotek naložení",
+        "rizikový dodavatel, kontejner nebo importní objednávka"
+      ],
+      "known_limits": [
+        "Čína 13 pochází ze source sheetu Čína 0526 a v odpovědích se nesmí zobrazovat jako samostatná business objednávka",
+        "Čína 13 může mít neznámé množství, dokud není doplněn supplemental PO/PDF/XLS",
+        "landed cost není kompletní, pokud chybí importní ceny nebo KN/freight faktury",
+        "stockout tvrzení musí říkat podle dostupných dat, pokud chybí stock, inbound nebo velocity coverage"
+      ],
+      "allowed_operations": ["select"],
+      "mutation_allowed": false
+    },
+    {
+      "id": "ai_memory",
+      "label": "AI týmová paměť",
+      "system": "Supabase knowledge layer",
+      "tables_or_views": [
+        "ai_business_contexts",
+        "ai_playbooks",
+        "ai_examples",
+        "ai_memories",
+        "ai_meeting_notes",
+        "ai_memory_candidates"
+      ],
+      "freshness_requirement": "agent má načíst relevantní paměti před interpretací komplexního problému",
+      "can_answer": [
+        "co jsme už řešili",
+        "jaké hypotézy jsou otevřené",
+        "jaká rozhodnutí padla",
+        "co má agent sledovat po meetingu",
+        "jaký playbook použít"
+      ],
+      "known_limits": [
+        "paměť není fakt o datech, dokud není podložená datovým zdrojem",
+        "nová paměť má vznikat jako candidate nebo explicitně potvrzený záznam"
+      ],
+      "allowed_operations": ["select", "insert_candidate"],
+      "mutation_allowed": "ai_memory_candidates_only"
+    }
+  ]
+}

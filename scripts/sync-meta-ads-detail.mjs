@@ -39,6 +39,7 @@ import {
   startSyncRun,
   upsertSupabaseRows,
 } from './lib/ads-sync-utils.mjs';
+import { pathToFileURL } from 'node:url';
 
 const PROVIDER = 'meta_ads';
 const REQUIRED_ENV_VARS = ['META_ACCESS_TOKEN', 'META_ADS_ACCOUNTS_JSON', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'];
@@ -337,7 +338,7 @@ function rawInsightRow({ row, account, level, fetchedAt }) {
   };
 }
 
-async function main() {
+export async function runMetaAdsDetailSync() {
   for (const name of REQUIRED_ENV_VARS) requireEnv(name);
 
   const apiVersion = process.env.META_GRAPH_API_VERSION || 'v24.0';
@@ -501,7 +502,13 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error('[sync-meta-ads-detail] FAILED:', error.message);
-  process.exit(1);
-});
+function isDirectRun() {
+  return Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
+}
+
+if (isDirectRun()) {
+  runMetaAdsDetailSync().catch((error) => {
+    console.error('[sync-meta-ads-detail] FAILED:', error.message);
+    process.exit(1);
+  });
+}

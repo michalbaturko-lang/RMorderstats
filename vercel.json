@@ -1,0 +1,20 @@
+{
+  "functions": {
+    "api/cron/sync-ads-spend.js": {
+      "maxDuration": 300
+    },
+    "api/cron/sync-upgates-catalog.js": {
+      "maxDuration": 300
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/sync-ads-spend",
+      "schedule": "3,18,33,48 * * * *"
+    },
+    {
+      "path": "/api/cron/sync-upgates-catalog",
+      "schedule": "11 * * * *"
+    }
+  ]
+}

@@ -1,8 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import { getCurrencyRateToCzk } from './currencyRates';
 import AdsModule from './AdsModule';
 import FinanceModule from './FinanceModule';
+import ImportLogisticsModule from './ImportLogisticsModule';
 import MarginModule from './MarginModule';
+import PokecModule from './PokecModule';
+import ProductsModule from './ProductsModule';
+import { isExcludedBusinessOrder } from './businessOrderStatus';
+import { attachPurchasePriceLookup, buildPurchasePriceLookup } from './orderLineItems';
+import { MODULE_IDS, getUserAccess } from './userPermissions';
 import {
   Bar,
   CartesianGrid,
@@ -20,7 +27,179 @@ const SUPABASE_URL = 'https://oonnawrfsbsbuijmfcqj.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9vbm5hd3Jmc2JzYnVpam1mY3FqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzMjA4ODcsImV4cCI6MjA4NTg5Njg4N30.d1jk1BYOc6eEx-KJzGpW3ekfDs4jxW10VgKmLef8f1Y';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-const FINANCE_ALLOWED_EMAILS = ['michal.baturko@regalmaster.cz', 'kristyna.vencel@regalmaster.cz'];
+
+const OVERVIEW_TAB_ID = 'overview';
+
+const APP_TABS = [
+  { id: OVERVIEW_TAB_ID, l: 'Orders overview', icon: 'home', group: 'main', sub: 'Souhrn dne — objednávky, marže, reklamy.' },
+  { id: MODULE_IDS.ADS, l: 'Reklamy', icon: 'trend', group: 'main', sub: 'PNO, ROAS, spend napříč platformami.' },
+  { id: MODULE_IDS.PRODUCTS, l: 'Produkty', icon: 'bag', group: 'main', sub: 'Prodej, marže a sklad podle SKU.' },
+  { id: MODULE_IDS.IMPORT_LOGISTICS, l: 'Importní logistika', icon: 'ship', group: 'main', sub: 'Co je na cestě, ETA, dokumenty.' },
+  { id: MODULE_IDS.FINANCE, l: 'Finance', icon: 'wallet', group: 'main', sub: 'Cash flow, kategorie, sync s bankou.' },
+  { id: MODULE_IDS.POKEC, l: 'Pokec', icon: 'chat', group: 'main', sub: 'AI asistent nad business daty.' },
+  { id: MODULE_IDS.HEATMAP, l: 'Časová analýza', icon: 'calendar', group: 'orders', sub: 'Den × hodina, tempo, vývoj.' },
+  { id: MODULE_IDS.MARGIN, l: 'Marže', icon: 'percent', group: 'orders', sub: 'Hrubý zisk, coverage, chybějící nákupky.' },
+  { id: MODULE_IDS.TEMPO, l: 'Tempo dne', icon: 'pulse', group: 'orders', sub: 'Aktuální tempo proti vzoru.' },
+  { id: MODULE_IDS.GEO, l: 'Geografie', icon: 'globe', group: 'orders', sub: 'Země, regiony, města.' },
+  { id: MODULE_IDS.B2B, l: 'B2B / B2C', icon: 'users', group: 'orders', sub: 'Mix zákazníků, AOV, vývoj.' },
+];
+
+const NAV_GROUPS = [
+  { id: 'main', label: 'Přehled' },
+  { id: 'orders', label: 'Objednávky' },
+];
+
+const IconPath = ({ type }) => {
+  const common = {
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: '1.8',
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    className: 'rm-ico',
+    'aria-hidden': 'true',
+  };
+  const paths = {
+    home: <><path d="M4 10.5 12 4l8 6.5" /><path d="M6.5 10.5V20h11v-9.5" /></>,
+    trend: <><path d="M3 17l6-6 4 4 8-8" /><path d="M15 7h6v6" /></>,
+    bag: <><path d="M6 8h12l-1 12H7L6 8Z" /><path d="M9 8a3 3 0 0 1 6 0" /></>,
+    ship: <><path d="M3 18h18l-1.5 3H4.5L3 18Z" /><path d="M5 14V8l7-4 7 4v6" /><path d="M9 8h6M9 11h6" /></>,
+    wallet: <><rect x="3" y="6" width="18" height="13" rx="2" /><path d="M16 12.5h3" /><path d="M3 9h18" /></>,
+    chat: <path d="M21 12c0 4-4 7-9 7-1.4 0-2.7-.2-3.9-.6L3 20l1-3.5C3.3 15.2 3 13.6 3 12c0-4 4-7 9-7s9 3 9 7Z" />,
+    calendar: <><path d="M7 3v4M17 3v4" /><rect x="4" y="5" width="16" height="16" rx="2" /><path d="M4 10h16" /></>,
+    percent: <><circle cx="7" cy="7" r="2.5" /><circle cx="17" cy="17" r="2.5" /><path d="M19 5 5 19" /></>,
+    pulse: <path d="M3 12h4l2-6 4 12 2-6h6" />,
+    globe: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18" /><path d="M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></>,
+    users: <><circle cx="9" cy="9" r="3" /><circle cx="17" cy="11" r="2.5" /><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6" /><path d="M14 17c.6-2 2.4-3.5 4.5-3.5s4 1.5 4.5 3.5" /></>,
+    menu: <><path d="M4 7h16" /><path d="M4 12h16" /><path d="M4 17h16" /></>,
+    refresh: <><path d="M21 12a9 9 0 0 1-15 6.7" /><path d="M3 12A9 9 0 0 1 18 5.3" /><path d="M18 2v4h-4" /><path d="M6 22v-4h4" /></>,
+    logout: <><path d="M10 17l5-5-5-5" /><path d="M15 12H3" /><path d="M21 3v18" /></>,
+    x: <><path d="M18 6 6 18" /><path d="m6 6 12 12" /></>,
+  };
+  return <svg {...common}>{paths[type] || paths.home}</svg>;
+};
+
+class ModuleErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error) {
+    console.error(`${this.props.label || 'Modul'} spadl`, error);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+          <div className="font-semibold">{this.props.label || 'Modul'} se nepodařilo vykreslit.</div>
+          <div className="mt-1 text-xs">{this.state.error?.message || 'Neznámá chyba'}</div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const getSupabaseStorageKey = () => {
+  try {
+    const projectRef = new URL(SUPABASE_URL).hostname.split('.')[0];
+    return `sb-${projectRef}-auth-token`;
+  } catch {
+    return '';
+  }
+};
+
+const getStoredSupabaseSession = () => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const storageKey = getSupabaseStorageKey();
+    if (!storageKey) return null;
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const session = parsed?.currentSession || parsed?.session || parsed;
+    if (!session?.user) return null;
+    if (session.expires_at && session.expires_at * 1000 <= Date.now()) return null;
+    return session;
+  } catch {
+    return null;
+  }
+};
+
+const getStoredSupabaseUser = () => getStoredSupabaseSession()?.user || null;
+
+const getInitialAppTab = (email) => {
+  const access = getUserAccess(email);
+  if (access.isLogisticsOnly) return MODULE_IDS.IMPORT_LOGISTICS;
+  if (access.canFetchDashboardOrders) return OVERVIEW_TAB_ID;
+  return access.defaultTab;
+};
+
+const ORDERS_CACHE_PREFIX = 'rm-orders-cache-v1';
+
+const ordersCacheKey = (dateFrom, dateTo) => `${ORDERS_CACHE_PREFIX}:${dateFrom}:${dateTo}`;
+
+const getCachedOrders = (dateFrom, dateTo) => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(ordersCacheKey(dateFrom, dateTo));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed?.orders)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const storeCachedOrders = (dateFrom, dateTo, orders) => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(ordersCacheKey(dateFrom, dateTo), JSON.stringify({
+      cachedAt: new Date().toISOString(),
+      orders,
+    }));
+  } catch {
+    // Cache is best-effort; dashboard data must not fail because storage is full.
+  }
+};
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+async function fetchPurchasePriceLookup() {
+  const rows = [];
+  const pageSize = 1000;
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from('upgates_product_purchase_prices_current')
+      .select('product_code,currency,purchase_price_without_vat_native')
+      .not('purchase_price_without_vat_native', 'is', null)
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+    const chunk = Array.isArray(data) ? data : [];
+    rows.push(...chunk);
+    if (chunk.length < pageSize) break;
+  }
+
+  return buildPurchasePriceLookup(rows);
+}
 
 const LOADING_MESSAGES = [
   "🔧 Stavím regál...",
@@ -54,7 +233,6 @@ const LOADING_MESSAGES = [
 const DAYS = ['Ne', 'Po', 'Út', 'St', 'Čt', 'Pá', 'So'];
 const DAYS_FULL = ['Neděle', 'Pondělí', 'Úterý', 'Středa', 'Čtvrtek', 'Pátek', 'Sobota'];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
-const CURRENCY_RATES = { CZK: 1, EUR: 25.2, HUF: 0.063, RON: 5.1 };
 const MARKET_LABELS = { all: 'Všechny země', cz: 'Česko', sk: 'Slovensko', hu: 'Maďarsko', ro: 'Rumunsko', unknown: 'Neznámá země' };
 const MARKET_ORDER = ['cz', 'sk', 'hu', 'ro', 'unknown'];
 
@@ -96,8 +274,8 @@ const toNumber = (value) => {
   const n = Number(String(value ?? 0).replace(',', '.'));
   return Number.isFinite(n) ? n : 0;
 };
-const getOrderCurrency = (order) => order.currency || order.raw_data?.currency_id || 'CZK';
-const getOrderRate = (order) => CURRENCY_RATES[getOrderCurrency(order)] || 1;
+const getOrderCurrency = (order) => order.currency || order.raw_data?.currency_id || order.raw_data?.currency?.code || order.raw_data?.currency || 'CZK';
+const getOrderRate = (order) => getCurrencyRateToCzk(getOrderCurrency(order));
 
 // Výpočet obratu BEZ DPH a BEZ poštovného
 const getRevenueWithoutVAT = (order) => {
@@ -128,11 +306,7 @@ const deduplicateOrders = (orders) => {
 
 // Filtr stornovaných objednávek (kontroluje status na top-level i v raw_data)
 const filterCancelled = (orders) => {
-  return orders.filter(o => {
-    const s1 = (o.status || '').toUpperCase();
-    const s2 = (o.raw_data?.status || '').toUpperCase();
-    return s1 !== 'STORNO' && s2 !== 'STORNO';
-  });
+  return orders.filter((order) => !isExcludedBusinessOrder(order));
 };
 
 const formatNumber = (num) => Math.round(num).toLocaleString('cs-CZ');
@@ -168,6 +342,11 @@ const parseDateFromInput = (value) => {
   const [year, month, day] = (value || '').split('-').map(Number);
   if (!year || !month || !day) return null;
   return new Date(year, month - 1, day);
+};
+const formatShortDateLabel = (value) => {
+  const date = parseDateFromInput(value);
+  if (!date) return '—';
+  return date.toLocaleDateString('cs-CZ', { day: '2-digit', month: '2-digit' });
 };
 const formatAxisCurrency = (num) => {
   if (Math.abs(num) >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
@@ -229,17 +408,17 @@ const getDatePreset = (preset) => {
 };
 
 const kpiSubToneClass = {
-  muted: 'text-slate-400',
-  red: 'font-semibold text-red-700',
-  amber: 'font-semibold text-amber-700',
-  blue: 'font-semibold text-blue-700',
+  muted: '',
+  red: 'rm-kpi-sub--red',
+  amber: 'rm-kpi-sub--amber',
+  blue: 'rm-kpi-sub--blue',
 };
 
 const KPICard = ({ title, value, icon, sub, subTone = 'muted' }) => (
-  <div className="bg-white rounded-xl p-3 shadow-sm border border-slate-200">
-    <div className="flex items-center gap-2 text-slate-500 text-xs mb-1">{icon} {title}</div>
-    <div className="text-2xl font-bold text-slate-800">{value}</div>
-    {sub && <div className={`text-xs mt-1 ${kpiSubToneClass[subTone] || kpiSubToneClass.muted}`}>{sub}</div>}
+  <div className="rm-kpi">
+    <div className="rm-kpi-label">{title}</div>
+    <div className="rm-kpi-value">{value}</div>
+    {sub && <div className={`rm-kpi-sub ${kpiSubToneClass[subTone] || kpiSubToneClass.muted}`}>{sub}</div>}
   </div>
 );
 
@@ -254,88 +433,188 @@ const emptyAdsSummary = () => ({
   providers: [],
   markets: [],
   marketBreakdown: [],
+  providerBreakdown: [],
   firstDate: '',
   lastDate: '',
+  syncFreshness: [],
+  warnings: [],
 });
+
+const providerLabelShort = (provider) => {
+  if (provider === 'google_ads') return 'Google';
+  if (provider === 'meta_ads') return 'Meta';
+  return provider || 'Neznámý';
+};
+
+const adsSourceLabel = (providers = []) => {
+  if (!providers.length) return 'Bez Ads dat';
+  if (providers.includes('google_ads') && providers.includes('meta_ads')) return 'Google + Meta';
+  if (providers.includes('google_ads')) return 'Google Ads';
+  if (providers.includes('meta_ads')) return 'Meta Ads';
+  return providers.map(providerLabelShort).join(' + ');
+};
+
+const adsFreshnessStatusLabel = (status) => {
+  if (status === 'ok') return 'čerstvé';
+  if (status === 'warn') return 'stará data';
+  if (status === 'fail') return 'problém';
+  return status || 'neznámé';
+};
+
+const formatAdsFreshnessTime = (value) => {
+  const parsed = new Date(String(value || ''));
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toLocaleString('cs-CZ', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
+const formatAdsFreshnessMeta = (row) => {
+  const parts = [];
+  const time = formatAdsFreshnessTime(row?.lastSuccessAt);
+  if (time) parts.push(time);
+  if (Number.isFinite(Number(row?.lastSuccessAgeMinutes))) {
+    parts.push(`${Math.round(Number(row.lastSuccessAgeMinutes))} min`);
+  }
+  if (row?.lastSuccessRangeFrom && row?.lastSuccessRangeTo) {
+    parts.push(`${row.lastSuccessRangeFrom} až ${row.lastSuccessRangeTo}`);
+  }
+  return parts.join(' · ');
+};
 
 const AdsKpiStrip = ({ summary, revenue, revenueByMarket = {}, onOpenAds }) => {
   const pno = revenue ? (summary.spend / revenue) * 100 : 0;
   const realRoas = summary.spend ? revenue / summary.spend : 0;
   const platformRoas = summary.spend ? summary.conversionValue / summary.spend : 0;
   const hasData = summary.rows > 0 || summary.spend > 0;
-  const hasMeta = summary.providers.includes('meta_ads');
+  const providerRows = summary.providerBreakdown?.length
+    ? summary.providerBreakdown
+    : summary.providers.map((provider) => ({ provider, spend: 0, clicks: 0, rowCount: 0, sharePct: 0 }));
+  const freshnessRows = Array.isArray(summary.syncFreshness) ? summary.syncFreshness : [];
+  const freshnessWarnings = Array.isArray(summary.warnings) ? summary.warnings : [];
 
   return (
-    <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/70 p-3 shadow-sm">
-      <div className="mb-2 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <div className="text-sm font-semibold text-slate-800">📣 Reklamy ve vybraném období</div>
-          <div className="text-xs text-slate-500">
-            {summary.loading
-              ? 'Načítám Ads spend ze Supabase…'
-              : summary.error
-                ? summary.error
-                : hasData
-                  ? `${summary.firstDate || 'bez data'} až ${summary.lastDate || 'bez data'} · ${summary.providers.map(p => p === 'google_ads' ? 'Google Ads' : 'Meta Ads').join(', ')}`
-                  : 'Pro filtr zatím nejsou campaign Ads data.'}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={onOpenAds}
-          className="self-start rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-700 shadow-sm hover:border-amber-400 hover:bg-amber-100 md:self-auto"
-        >
-          Otevřít Reklamy
-        </button>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-        <div>
-          <div className="text-xs text-slate-500">Spend</div>
-          <div className="text-xl font-bold text-red-700">{summary.loading ? '…' : formatCurrency(summary.spend)}</div>
-        </div>
-        <div>
-          <div className="text-xs text-slate-500">PNO</div>
-          <div className="text-xl font-bold text-slate-800">{summary.loading ? '…' : formatPercent(pno)}</div>
-        </div>
-        <div>
-          <div className="text-xs text-slate-500">Real ROAS</div>
-          <div className="text-xl font-bold text-blue-700">{summary.loading ? '…' : realRoas.toFixed(2).replace('.', ',')}</div>
-        </div>
-        <div>
-          <div className="text-xs text-slate-500">Platform ROAS</div>
-          <div className="text-xl font-bold text-emerald-700">{summary.loading ? '…' : platformRoas.toFixed(2).replace('.', ',')}</div>
-        </div>
-        <div>
-          <div className="text-xs text-slate-500">Pokrytí</div>
-          <div className="text-sm font-semibold text-slate-700">
-            {summary.loading ? '…' : `${formatNumber(summary.rows)} campaign řádků`}
-          </div>
-          <div className="text-xs text-slate-500">{hasMeta ? 'Google + Meta' : 'Meta čeká na přístup'}</div>
+    <section>
+      <div className="rm-section-head">
+        <div className="rm-section-title">Reklamy ve vybraném období</div>
+        <div className="rm-section-sub">
+          {summary.loading
+            ? 'Načítám Ads spend ze Supabase…'
+            : summary.error
+              ? summary.error
+              : hasData
+                ? `${summary.firstDate || 'bez data'} až ${summary.lastDate || 'bez data'} · ${adsSourceLabel(summary.providers)}`
+                : 'Pro filtr zatím nejsou campaign Ads data.'}
         </div>
       </div>
+      <div className="rm-ads-panel">
+        <div className="rm-ads-head">
+          <div>
+            <div className="rm-ads-label">Spend</div>
+            <div className="rm-ads-value rm-ads-value--neg">{summary.loading ? '…' : summary.error ? '—' : formatCurrency(summary.spend)}</div>
+            <div className="rm-ads-sub">{summary.loading ? 'Načítám…' : `${formatNumber(summary.rows)} denních řádků`}</div>
+          </div>
+          <div>
+            <div className="rm-ads-label">PNO</div>
+            <div className="rm-ads-value rm-ads-value--warn">{summary.loading ? '…' : summary.error ? '—' : formatPercent(pno)}</div>
+            <div className="rm-ads-sub">Spend / obrat (bez DPH)</div>
+          </div>
+          <div>
+            <div className="rm-ads-label">Real ROAS</div>
+            <div className="rm-ads-value">{summary.loading ? '…' : summary.error ? '—' : realRoas.toFixed(2).replace('.', ',')}</div>
+            <div className="rm-ads-sub">Obrat / spend</div>
+          </div>
+          <div>
+            <div className="rm-ads-label">Platform ROAS</div>
+            <div className="rm-ads-value rm-ads-value--warn">{summary.loading ? '…' : summary.error ? '—' : platformRoas.toFixed(2).replace('.', ',')}</div>
+            <div className="rm-ads-sub">Hlášené platformami</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div className="rm-ads-sub">Pokrytí</div>
+            <div style={{ marginTop: 2, color: 'var(--rm-text-1)', fontSize: 12 }}>{summary.loading ? '…' : summary.error ? 'Souhrn nedostupný' : adsSourceLabel(summary.providers)}</div>
+            <button type="button" onClick={onOpenAds} className="rm-btn rm-btn--ghost" style={{ marginTop: 6, height: 24, padding: '0 4px', color: 'var(--rm-accent)' }}>
+              Otevřít Reklamy →
+            </button>
+          </div>
+        </div>
 
-      {summary.marketBreakdown?.length > 0 && (
-        <div className="mt-3 border-t border-amber-200 pt-3">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-800">Rozpad podle země</div>
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-            {summary.marketBreakdown.map((row) => {
-              const marketRevenue = revenueByMarket[row.market] || 0;
-              const marketPno = marketRevenue ? (row.spend / marketRevenue) * 100 : 0;
-              return (
-                <div key={row.market} className="rounded-lg border border-amber-200 bg-white/80 p-2">
-                  <div className="text-xs font-semibold text-slate-600">{MARKET_LABELS[row.market] || row.market.toUpperCase()}</div>
-                  <div className="mt-1 text-base font-bold text-red-700">{formatCurrency(row.spend)}</div>
-                  <div className="text-xs text-slate-500">
-                    PNO {marketRevenue ? formatPercent(marketPno) : 'bez tržeb'}
+        {!summary.loading && !summary.error && freshnessRows.length > 0 && (
+          <div className="rm-ads-freshness">
+            {freshnessRows.map((row) => (
+              <div key={row.provider} className={`rm-ads-freshness-pill rm-ads-freshness-pill--${row.status || 'unknown'}`}>
+                <span>{providerLabelShort(row.provider)}: {adsFreshnessStatusLabel(row.status)}</span>
+                <small>{formatAdsFreshnessMeta(row) || row.message}</small>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!summary.loading && !summary.error && freshnessWarnings.length > 0 && (
+          <div className="rm-ads-inline-warning">
+            {freshnessWarnings.join(' ')}
+          </div>
+        )}
+
+        {providerRows.length > 0 && (
+          <div className="rm-ads-section">
+            <div className="rm-ads-section-title">Rozpad podle platformy</div>
+            <div className="rm-ads-platforms">
+              {providerRows.map((row) => {
+                const isMeta = row.provider === 'meta_ads';
+                return (
+                  <div key={row.provider} className="rm-ads-platform">
+                    <div className="rm-ads-platform-head">
+                      <div className="rm-ads-platform-name">
+                        <span className={`rm-ads-platform-logo ${isMeta ? 'rm-ads-platform-logo--meta' : ''}`}>{isMeta ? 'M' : 'G'}</span>
+                        {providerLabelShort(row.provider)}
+                      </div>
+                      <span className="rm-ads-platform-rows">{formatNumber(row.rowCount || 0)} řádků přehledu</span>
+                    </div>
+                    <div className="rm-ads-platform-val">{formatCurrency(row.spend || 0)}</div>
+                    <div className="rm-ads-platform-meta">
+                      {Number(row.sharePct || 0).toFixed(0)} % spendu · {formatNumber(row.clicks || 0)} kliků
+                    </div>
+                    <div className="rm-ads-bar">
+                      <div className="rm-ads-fill" style={{ width: `${Math.min(100, Math.max(0, Number(row.sharePct || 0)))}%`, background: isMeta ? '#1877f2' : '#4285f4' }} />
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+
+        {summary.marketBreakdown?.length > 0 && (
+          <div className="rm-ads-section">
+            <div className="rm-ads-section-title">Rozpad podle země</div>
+            <div className="rm-ads-countries">
+              {summary.marketBreakdown.map((row) => {
+                const marketRevenue = revenueByMarket[row.market] || 0;
+                const marketPno = marketRevenue ? (row.spend / marketRevenue) * 100 : 0;
+                const providerParts = [row.googleSpend, row.metaSpend]
+                  .map((value, index) => ({ label: index === 0 ? 'Google' : 'Meta', value }))
+                  .filter((item) => item.value > 0);
+                return (
+                  <div key={row.market} className="rm-ads-country">
+                    <div className="rm-ads-country-name">{MARKET_LABELS[row.market] || row.market.toUpperCase()}</div>
+                    <div className="rm-ads-country-val">{formatCurrency(row.spend)}</div>
+                    <div className="rm-ads-sub">PNO {marketRevenue ? formatPercent(marketPno) : 'bez tržeb'}</div>
+                    <div className="rm-ads-country-meta">
+                      {providerParts.length
+                        ? providerParts.map((item) => `${item.label} ${formatCurrency(item.value)}`).join(' · ')
+                        : 'Google / Meta bez spendu'}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
   );
 };
 
@@ -611,19 +890,19 @@ const LoadingOverlay = ({ message }) => (
 );
 
 const LoginPage = ({ onLogin, error: authError }) => (
-  <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
-    <div className="bg-white rounded-2xl shadow-lg p-8 max-w-sm w-full text-center">
-      <div className="text-4xl mb-4">📊</div>
-      <h1 className="text-2xl font-bold text-slate-800 mb-1">Order Analytics</h1>
-      <p className="text-slate-500 text-sm mb-6">REGAL MASTER</p>
+  <div className="rm-login-page">
+    <div className="rm-login-card">
+      <div className="rm-logo rm-login-logo">RM</div>
+      <h1 className="rm-login-title">RM Orders</h1>
+      <p className="rm-login-sub">REGAL MASTER analytics</p>
       {authError && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+        <div className="rm-alert rm-alert--danger">
           {authError}
         </div>
       )}
       <button
         onClick={onLogin}
-        className="w-full flex items-center justify-center gap-3 px-4 py-3 bg-white border-2 border-slate-200 rounded-xl text-sm font-medium text-slate-700 hover:border-blue-400 hover:shadow-md transition-all"
+        className="rm-login-button"
       >
         <svg className="w-5 h-5" viewBox="0 0 24 24">
           <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/>
@@ -633,23 +912,42 @@ const LoginPage = ({ onLogin, error: authError }) => (
         </svg>
         Přihlásit se přes Google
       </button>
-      <p className="text-xs text-slate-400 mt-4">
-        🚀 Impérium to bude.
+      <p className="rm-login-note">Přístup je řízený podle rolí v dashboardu.</p>
+    </div>
+  </div>
+);
+
+const NoAccessPage = ({ user, onLogout }) => (
+  <div className="rm-login-page">
+    <div className="rm-login-card">
+      <div className="rm-logo rm-login-logo">RM</div>
+      <h1 className="rm-login-title">Účet nemá přístup</h1>
+      <p className="rm-login-sub">
+        Přihlášený účet {user?.email || 'bez e-mailu'} není přiřazený k žádné roli v Order Analytics.
       </p>
+      <p className="rm-login-note">Pro povolení přístupu je potřeba přesně tento e-mail přidat do rolí.</p>
+      <button
+        onClick={onLogout}
+        className="rm-login-button rm-login-button--dark"
+      >
+        Odhlásit
+      </button>
     </div>
   </div>
 );
 
 export default function App() {
-  const [user, setUser] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  const [user, setUser] = useState(() => getStoredSupabaseUser());
+  const [authLoading, setAuthLoading] = useState(() => !getStoredSupabaseUser());
   const [authError, setAuthError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [dataWarning, setDataWarning] = useState('');
+  const [marginDataWarning, setMarginDataWarning] = useState('');
   const [orders, setOrders] = useState([]);
   const [country, setCountry] = useState('all');
   const [metric, setMetric] = useState('orders');
-  const [tab, setTab] = useState('heatmap');
+  const [tab, setTab] = useState(() => getInitialAppTab(getStoredSupabaseUser()?.email));
   const [cell, setCell] = useState(null);
   const [groupDays, setGroupDays] = useState(false);
   const [showTimeline, setShowTimeline] = useState(true);
@@ -660,26 +958,104 @@ export default function App() {
   const [loadingMessage, setLoadingMessage] = useState(LOADING_MESSAGES[0]);
   const [dateFrom, setDateFrom] = useState(() => formatDateForInput(new Date()));
   const [dateTo, setDateTo] = useState(() => formatDateForInput(new Date()));
+  const [refreshTick, setRefreshTick] = useState(0);
   const [adsSummary, setAdsSummary] = useState(() => emptyAdsSummary());
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [customRangeOpen, setCustomRangeOpen] = useState(false);
+  const [lastDefaultedUserEmail, setLastDefaultedUserEmail] = useState('');
+  const userEmail = (user?.email || '').toLowerCase();
+  const access = useMemo(() => getUserAccess(userEmail), [userEmail]);
+  const allowedTabs = useMemo(
+    () => APP_TABS.filter((item) => (
+      item.id === OVERVIEW_TAB_ID
+        ? access.canFetchDashboardOrders
+        : access.modules.includes(item.id)
+    )),
+    [access],
+  );
+  const appDefaultTab = access.isLogisticsOnly
+    ? MODULE_IDS.IMPORT_LOGISTICS
+    : access.canFetchDashboardOrders
+      ? OVERVIEW_TAB_ID
+      : access.defaultTab;
+  const canUseFinance = access.canUseFinance;
+  const canUsePokec = access.canUsePokec;
+  const canUseProducts = access.canUseProducts;
+  const canUseImportLogistics = access.modules.includes(MODULE_IDS.IMPORT_LOGISTICS);
+  const canUseAds = access.canUseAds;
+  const canUseHeatmap = access.modules.includes(MODULE_IDS.HEATMAP);
+  const canUseMargin = access.modules.includes(MODULE_IDS.MARGIN);
+  const canUseTempo = access.modules.includes(MODULE_IDS.TEMPO);
+  const canUseGeo = access.modules.includes(MODULE_IDS.GEO);
+  const canUseB2b = access.modules.includes(MODULE_IDS.B2B);
+  const showDashboardControls = access.canFetchDashboardOrders;
+  const todayKey = formatDateForInput(new Date());
+  const isLiveRange = dateFrom <= todayKey && dateTo >= todayKey;
+  const shouldAutoRefreshOrders = access.canFetchDashboardOrders && isLiveRange && ![MODULE_IDS.IMPORT_LOGISTICS, MODULE_IDS.POKEC, MODULE_IDS.PRODUCTS, MODULE_IDS.FINANCE].includes(tab);
+  const currentPageMeta = allowedTabs.find((item) => item.id === tab) || allowedTabs[0];
+  const showFilterBar = showDashboardControls && ![MODULE_IDS.IMPORT_LOGISTICS, MODULE_IDS.POKEC, MODULE_IDS.FINANCE].includes(tab);
+
+  useEffect(() => {
+    if (!user || !access.hasAccess) return;
+    if (!allowedTabs.some((item) => item.id === tab)) setTab(appDefaultTab);
+  }, [access, allowedTabs, appDefaultTab, tab, user]);
+
+  useEffect(() => {
+    if (!userEmail) {
+      setLastDefaultedUserEmail('');
+      return;
+    }
+    if (lastDefaultedUserEmail === userEmail) return;
+    setTab(appDefaultTab);
+    setLastDefaultedUserEmail(userEmail);
+  }, [appDefaultTab, lastDefaultedUserEmail, userEmail]);
 
   // Auth: listen for session changes
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setUser(session.user);
-      }
+    let cancelled = false;
+    let settled = false;
+    let authTimeout = null;
+
+    const finishAuth = (session, { allowStoredFallback = true } = {}) => {
+      if (cancelled) return;
+      settled = true;
+      if (authTimeout) window.clearTimeout(authTimeout);
+      const nextUser = session?.user || (allowStoredFallback ? getStoredSupabaseUser() : null);
+      setUser(nextUser || null);
+      setAuthError(null);
       setAuthLoading(false);
-    });
+    };
+
+    authTimeout = window.setTimeout(() => {
+      if (cancelled || settled) return;
+      finishAuth(null);
+    }, 8000);
+
+    supabase.auth
+      .getSession()
+      .then(({ data: { session }, error: sessionError }) => {
+        if (cancelled) return;
+        if (sessionError) {
+          finishAuth(null);
+          return;
+        }
+        finishAuth(session);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        finishAuth(null);
+      });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        setUser(session.user);
-        setAuthError(null);
-      } else {
-        setUser(null);
-      }
+      if (cancelled) return;
+      finishAuth(session, { allowStoredFallback: Boolean(session?.user) });
     });
-    return () => subscription.unsubscribe();
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(authTimeout);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const handleLogin = async () => {
@@ -711,6 +1087,7 @@ export default function App() {
       setDateFrom(dates.from);
       setDateTo(dates.to);
       setActivePreset(preset);
+      setCustomRangeOpen(false);
     }
   };
 
@@ -721,14 +1098,51 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (!shouldAutoRefreshOrders) return undefined;
+
+    const triggerRefresh = () => setRefreshTick((value) => value + 1);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') triggerRefresh();
+    }, 60_000);
+    const handleFocus = () => triggerRefresh();
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') triggerRefresh();
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [shouldAutoRefreshOrders]);
+
+  useEffect(() => {
+    if (!user || !access.canFetchDashboardOrders) {
+      setOrders([]);
+      setLoading(false);
+      setDataWarning('');
+      setMarginDataWarning('');
+      return;
+    }
+
     setLoading(true);
     setError(null);
+    setDataWarning('');
     setLoadingMessage(LOADING_MESSAGES[Math.floor(Math.random() * LOADING_MESSAGES.length)]);
     
     async function fetchAllOrders() {
       let allOrders = [];
       let offset = 0;
       const limit = 1000;
+      let usedPlainFallback = false;
+      let useAnonymousReadFallback = false;
+      let usedAnonymousReadFallback = false;
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) throw new Error('Chybí přihlášení pro načtení objednávek.');
       
       // Timezone offset pro správné filtrování podle lokálního času (CET/CEST)
       // +01:00 → %2B01:00 (URL encoding pro Supabase PostgREST)
@@ -739,19 +1153,45 @@ export default function App() {
       const tz = `${tzSign}${tzHours}:${tzMins}`;
 
       while (true) {
-        const response = await fetch(
-          `${SUPABASE_URL}/rest/v1/orders?select=*&order_date=gte.${dateFrom}T00:00:00${tz}&order_date=lte.${dateTo}T23:59:59${tz}&order=order_date.desc&limit=${limit}&offset=${offset}`,
-          {
-            headers: { 
-              'apikey': SUPABASE_KEY, 
-              'Authorization': `Bearer ${SUPABASE_KEY}`
-            }
+        const joinedUrl =
+          `${SUPABASE_URL}/rest/v1/orders?select=*,order_items(order_id,product_code,product_name,quantity,buy_price,unit_price_without_vat,total_price_without_vat,vat_rate,sku,ean)&order_date=gte.${dateFrom}T00:00:00${tz}&order_date=lte.${dateTo}T23:59:59${tz}&order=order_date.desc&limit=${limit}&offset=${offset}`;
+        const plainUrl =
+          `${SUPABASE_URL}/rest/v1/orders?select=*&order_date=gte.${dateFrom}T00:00:00${tz}&order_date=lte.${dateTo}T23:59:59${tz}&order=order_date.desc&limit=${limit}&offset=${offset}`;
+        const requestOptions = (anonymous = useAnonymousReadFallback) => ({
+          headers: {
+            'apikey': SUPABASE_KEY,
+            ...(anonymous ? {} : { 'Authorization': `Bearer ${accessToken}` }),
           }
-        );
+        });
+
+        let activeUrl = joinedUrl;
+        let response = await fetchWithTimeout(activeUrl, requestOptions(), 6000);
+        if (!response.ok && [502, 503, 504].includes(response.status)) {
+          usedPlainFallback = true;
+          activeUrl = plainUrl;
+          response = await fetchWithTimeout(activeUrl, requestOptions(), 6000);
+        }
         
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         
-        const data = await response.json();
+        let data = await response.json();
+        if (
+          offset === 0
+          && !useAnonymousReadFallback
+          && Array.isArray(data)
+          && data.length === 0
+        ) {
+          const anonymousResponse = await fetchWithTimeout(activeUrl, requestOptions(true), 6000);
+          if (anonymousResponse.ok) {
+            const anonymousData = await anonymousResponse.json();
+            if (Array.isArray(anonymousData) && anonymousData.length > 0) {
+              useAnonymousReadFallback = true;
+              usedAnonymousReadFallback = true;
+              data = anonymousData;
+              console.warn('Supabase authenticated RLS returned no orders; using anon read fallback until authenticated read policies are applied.');
+            }
+          }
+        }
         if (!Array.isArray(data) || data.length === 0) break;
         
         allOrders = allOrders.concat(data);
@@ -760,30 +1200,65 @@ export default function App() {
         if (data.length < limit) break;
       }
       
-      return allOrders;
+      return { allOrders, usedPlainFallback, usedAnonymousReadFallback };
     }
-    
-    fetchAllOrders()
-      .then(d => {
+
+    Promise.all([
+      fetchAllOrders(),
+      fetchPurchasePriceLookup().catch((lookupError) => {
+        console.warn('Nákupky z UpGates katalogu se nepodařilo načíst:', lookupError);
+        return null;
+      }),
+    ])
+      .then(([{ allOrders: d, usedPlainFallback, usedAnonymousReadFallback }, purchasePriceLookup]) => {
         const deduped = deduplicateOrders(d);
-        const clean = filterCancelled(deduped);
+        const cleanBase = filterCancelled(deduped);
+        const clean = attachPurchasePriceLookup(cleanBase, purchasePriceLookup);
         setOrders(clean);
+        storeCachedOrders(dateFrom, dateTo, clean);
+        setDataWarning('');
+        setMarginDataWarning(
+          [
+            usedPlainFallback
+              ? 'Část objednávek se načetla bez order_items. Marže, produkty a Ads ekonomika proto běží v omezeném režimu a přesné marže mohou být podhodnocené nebo neúplné.'
+              : '',
+            purchasePriceLookup
+              ? ''
+              : 'Kanonické UpGates nákupky se nenačetly; marže běží přes snapshot objednávky a order_items fallback.',
+          ].filter(Boolean).join(' '),
+        );
         if (deduped.length < d.length) {
           console.warn(`⚠️ Deduplikace: ${d.length} → ${deduped.length} (odstraněno ${d.length - deduped.length} duplikátů)`);
         }
         if (clean.length < deduped.length) {
           console.warn(`🚫 Storno filtr: ${deduped.length} → ${clean.length} (odstraněno ${deduped.length - clean.length} stornovaných)`);
         }
+        if (usedAnonymousReadFallback) {
+          console.warn('Objednávky se načetly přes anon read fallback; je potřeba dotáhnout Supabase RLS pro authenticated roli.');
+        }
         setLoading(false);
       })
-      .catch(e => { setError(e.message); setLoading(false); });
-  }, [dateFrom, dateTo]);
+      .catch(e => {
+        const cached = getCachedOrders(dateFrom, dateTo);
+        if (cached) {
+          setOrders(cached.orders);
+          setDataWarning(`Supabase teď vrací ${e.message || 'chybu načítání'}; zobrazuji poslední uložený snapshot z ${new Date(cached.cachedAt).toLocaleString('cs-CZ')}.`);
+          setMarginDataWarning('');
+        } else {
+          setOrders([]);
+          setDataWarning(`Supabase teď vrací ${e.message || 'chybu načítání'}; pro toto období nemám v browseru uložený snapshot.`);
+          setMarginDataWarning('');
+        }
+        setError(null);
+        setLoading(false);
+      });
+  }, [access.canFetchDashboardOrders, dateFrom, dateTo, refreshTick, user]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function fetchAdsSummary() {
-      if (!user) {
+      if (!user || !canUseAds) {
         setAdsSummary({ ...emptyAdsSummary(), loading: false });
         return;
       }
@@ -791,57 +1266,25 @@ export default function App() {
       setAdsSummary(emptyAdsSummary());
 
       try {
-        let query = supabase
-          .from('ad_metrics_daily')
-          .select('date,provider,market,spend_czk,clicks,conversions,conversion_value_czk')
-          .gte('date', dateFrom)
-          .lte('date', dateTo)
-          .eq('level', 'campaign')
-          .range(0, 9999);
+        const params = new URLSearchParams({ dateFrom, dateTo });
+        if (country !== 'all') params.set('country', country);
 
-        if (country !== 'all') query = query.eq('market', country);
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (!token) throw new Error('Chybí přihlášení pro Ads souhrn.');
 
-        const { data, error: adsError } = await query;
-        if (adsError) throw adsError;
-        if (cancelled) return;
-
-        const rows = Array.isArray(data) ? data : [];
-        const providers = [...new Set(rows.map(row => row.provider).filter(Boolean))].sort();
-        const markets = [...new Set(rows.map(row => row.market).filter(Boolean))].sort();
-        const dates = rows.map(row => row.date).filter(Boolean).sort();
-        const byMarket = new Map();
-
-        rows.forEach((row) => {
-          const market = row.market || 'unknown';
-          if (!byMarket.has(market)) {
-            byMarket.set(market, { market, spend: 0, clicks: 0, conversions: 0, conversionValue: 0 });
-          }
-          const target = byMarket.get(market);
-          target.spend += Number(row.spend_czk || 0);
-          target.clicks += Number(row.clicks || 0);
-          target.conversions += Number(row.conversions || 0);
-          target.conversionValue += Number(row.conversion_value_czk || 0);
+        const response = await fetch(`/api/ads-summary?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
         });
 
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload?.error || `HTTP ${response.status}`);
+        if (cancelled) return;
         setAdsSummary({
+          ...emptyAdsSummary(),
+          ...payload,
           loading: false,
           error: '',
-          rows: rows.length,
-          spend: rows.reduce((sum, row) => sum + Number(row.spend_czk || 0), 0),
-          clicks: rows.reduce((sum, row) => sum + Number(row.clicks || 0), 0),
-          conversions: rows.reduce((sum, row) => sum + Number(row.conversions || 0), 0),
-          conversionValue: rows.reduce((sum, row) => sum + Number(row.conversion_value_czk || 0), 0),
-          providers,
-          markets,
-          marketBreakdown: Array.from(byMarket.values())
-            .sort((a, b) => {
-              const ai = MARKET_ORDER.indexOf(a.market);
-              const bi = MARKET_ORDER.indexOf(b.market);
-              if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
-              return a.market.localeCompare(b.market);
-            }),
-          firstDate: dates[0] || '',
-          lastDate: dates[dates.length - 1] || '',
         });
       } catch (err) {
         if (!cancelled) {
@@ -859,7 +1302,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [user, dateFrom, dateTo, country]);
+  }, [canUseAds, user, dateFrom, dateTo, country, refreshTick]);
 
   const filtered = useMemo(() => country === 'all' ? orders : orders.filter(o => o.market === country), [orders, country]);
 
@@ -914,6 +1357,17 @@ export default function App() {
         : kpis.revenue
           ? `PNO ${formatPercent(adsPno)} · Ads ${formatCurrency(adsSummary.spend)}`
           : `PNO: bez tržeb · Ads ${formatCurrency(adsSummary.spend)}`;
+  const adsBreakdownSub = adsSummary.loading
+    ? 'Ads: načítám rozpad'
+    : adsSummary.error
+      ? 'Ads: nedostupné'
+      : !hasAdsData
+        ? 'Ads: bez spendu'
+        : adsSummary.providerBreakdown.length
+          ? adsSummary.providerBreakdown
+              .map((row) => `${providerLabelShort(row.provider)} ${formatCurrency(row.spend)}`)
+              .join(' · ')
+          : `Ads ${formatCurrency(adsSummary.spend)}`;
 
   const heatmap = useMemo(() => {
     const d = {};
@@ -1404,6 +1858,54 @@ export default function App() {
     }
   }, [b2bStats]);
 
+  const userInitials = (user?.email || 'RM')
+    .split('@')[0]
+    .split(/[._-]+/)
+    .map((part) => part[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase() || 'RM';
+
+  const navigateToTab = (id) => {
+    setTab(id);
+    setMobileMenuOpen(false);
+  };
+
+  const navContent = (
+    <>
+      {NAV_GROUPS.map((group) => {
+        const items = allowedTabs.filter((item) => item.group === group.id);
+        if (!items.length) return null;
+        return (
+          <div key={group.id} className="rm-nav-group">
+            <div className="rm-nav-group-label">{group.label}</div>
+            {items.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => navigateToTab(item.id)}
+                className={`rm-nav-item ${tab === item.id ? 'rm-nav-item--active' : ''}`}
+              >
+                <span className="rm-nav-icon"><IconPath type={item.icon} /></span>
+                <span className="rm-nav-label">{item.l}</span>
+              </button>
+            ))}
+          </div>
+        );
+      })}
+    </>
+  );
+
+  const countryOptions = [
+    { c: 'all', n: 'Vše' },
+    { c: 'cz', n: 'CZ' },
+    { c: 'sk', n: 'SK' },
+    { c: 'hu', n: 'HU' },
+    { c: 'ro', n: 'RO' },
+  ];
+  const customRangeSummary = `${formatShortDateLabel(dateFrom)} – ${formatShortDateLabel(dateTo)}`;
+  const isCustomRangeActive = activePreset === null;
+
   if (authLoading) return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
       <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full"></div>
@@ -1411,6 +1913,8 @@ export default function App() {
   );
 
   if (!user) return <LoginPage onLogin={handleLogin} error={authError} />;
+
+  if (!access.hasAccess) return <NoAccessPage user={user} onLogout={handleLogout} />;
 
   if (error) return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
@@ -1423,121 +1927,170 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 md:p-6">
+    <div className="rm-app">
       {loading && <LoadingOverlay message={loadingMessage} />}
-      
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 gap-4">
+
+      <aside className="rm-sidebar">
+        <div className="rm-brand">
+          <div className="rm-logo">RM</div>
           <div>
-            <h1 className="text-2xl font-bold text-slate-800">📊 Order Analytics</h1>
-            <p className="text-slate-500 text-sm">REGAL MASTER - Analýza objednávek (bez DPH a poštovného)</p>
+            <div className="rm-brand-name">RM Orders</div>
+            <div className="rm-brand-sub">Regal Master</div>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-400">{user.email}</span>
-            <button
-              onClick={handleLogout}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all"
-            >
-              Odhlásit
+        </div>
+        <nav className="rm-sidebar-nav">{navContent}</nav>
+        <div className="rm-sidebar-footer">
+          <div className="rm-health-line"><span className="rm-health-dot" />Sync <strong>OK</strong></div>
+          <div className="rm-health-meta">Upgates · Ads · Fio · KN</div>
+        </div>
+      </aside>
+
+      <div className="rm-main">
+        <header className="rm-topbar">
+          <div className="flex min-w-0 items-center gap-3">
+            <button type="button" className="rm-btn rm-btn--ghost rm-btn--icon rm-menu-btn" onClick={() => setMobileMenuOpen(true)}>
+              <IconPath type="menu" />
             </button>
+            <div className="rm-title-wrap">
+              <div className="rm-title">{currentPageMeta?.l || 'Order Analytics'}</div>
+              <div className="rm-subtitle">{currentPageMeta?.sub || 'REGAL MASTER - Analýza objednávek'}</div>
+            </div>
           </div>
-        </div>
-
-        {/* Date Presets */}
-        <div className="bg-white rounded-xl p-3 shadow-sm border mb-4">
-          <div className="flex flex-wrap gap-2 mb-3">
-            <DatePresetButton label="Dnes" active={activePreset === 'today'} onClick={() => applyPreset('today')} />
-            <DatePresetButton label="Včera" active={activePreset === 'yesterday'} onClick={() => applyPreset('yesterday')} />
-            <DatePresetButton label="Tento týden" active={activePreset === 'this_week'} onClick={() => applyPreset('this_week')} />
-            <DatePresetButton label="Minulý týden" active={activePreset === 'last_week'} onClick={() => applyPreset('last_week')} />
-            <DatePresetButton label="Tento měsíc" active={activePreset === 'this_month'} onClick={() => applyPreset('this_month')} />
-            <DatePresetButton label="Minulý měsíc" active={activePreset === 'last_month'} onClick={() => applyPreset('last_month')} />
-            <DatePresetButton label="30 dní" active={activePreset === 'last_30'} onClick={() => applyPreset('last_30')} />
-            <DatePresetButton label="90 dní" active={activePreset === 'last_90'} onClick={() => applyPreset('last_90')} />
-            <DatePresetButton label="Od začátku roku" active={activePreset === 'this_year'} onClick={() => applyPreset('this_year')} />
-            <DatePresetButton label="Vše" active={activePreset === 'all'} onClick={() => applyPreset('all')} />
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500">Vlastní:</span>
-            <input 
-              type="date" 
-              value={dateFrom} 
-              onChange={e => handleDateChange('from', e.target.value)} 
-              className="px-2 py-1 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" 
-            />
-            <span className="text-slate-400">→</span>
-            <input 
-              type="date" 
-              value={dateTo} 
-              onChange={e => handleDateChange('to', e.target.value)} 
-              className="px-2 py-1 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" 
-            />
-          </div>
-        </div>
-
-        {/* Country filter */}
-        <div className="flex gap-2 mb-4 flex-wrap">
-          {[
-            { c: 'all', f: '🌍', n: 'Všechny země' }, 
-            { c: 'cz', f: '🇨🇿', n: 'Česko' }, 
-            { c: 'sk', f: '🇸🇰', n: 'Slovensko' }, 
-            { c: 'hu', f: '🇭🇺', n: 'Maďarsko' },
-            { c: 'ro', f: '🇷🇴', n: 'Rumunsko' }
-          ].map(x => (
-            <button 
-              key={x.c} 
-              onClick={() => setCountry(x.c)}
-              className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
-                country === x.c 
-                  ? 'bg-blue-500 text-white shadow-md' 
-                  : 'bg-white border border-slate-200 text-slate-600 hover:border-blue-300 hover:shadow-sm'
-              }`}
-            >
-              {x.f} {x.n}
+          <div className="rm-topbar-actions">
+            <button type="button" className="rm-btn rm-hide-mobile" onClick={() => setRefreshTick((value) => value + 1)}>
+              <IconPath type="refresh" />Obnovit
             </button>
-          ))}
-        </div>
-
-        {/* KPIs */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
-          <KPICard title="Objednávky" value={formatNumber(kpis.orders)} icon="🛒" />
-          <KPICard title="Obrat (bez DPH)" value={formatCurrency(kpis.revenue)} icon="💰" sub={adsPnoSub} subTone={hasAdsData ? 'red' : 'muted'} />
-          <KPICard title="Ø Objednávka" value={formatCurrency(kpis.aov)} icon="📦" />
-          <KPICard title="Tržba z poštovného" value={formatCurrency(kpis.shippingRevenue)} icon="🚚" sub="bez DPH, mimo PNO" />
-          <KPICard title="B2B podíl" value={`${kpis.b2bPct.toFixed(0)}%`} icon="🏢" sub={`🏙️ Velká města: ${kpis.bigPct.toFixed(0)}%`} />
-        </div>
-
-        <AdsKpiStrip summary={adsSummary} revenue={kpis.revenue} revenueByMarket={revenueByMarket} onOpenAds={() => setTab('ads')} />
-
-        {/* Tabs */}
-        <div className="flex gap-1 bg-white p-1 rounded-xl shadow-sm border mb-4">
-          {[
-            { id: 'heatmap', l: '🗓️ Časová analýza' },
-            { id: 'margin', l: '📈 Marže' },
-            { id: 'tempo', l: '⏱ Tempo dne' },
-            { id: 'geo', l: '📍 Geografie' },
-            { id: 'b2b', l: '🏢 B2B / B2C' },
-            { id: 'ads', l: '📣 Reklamy' },
-            ...(FINANCE_ALLOWED_EMAILS.includes(user?.email || '') ? [{ id: 'finance', l: '💰 Finance' }] : [])
-          ].map(t => (
-            <button 
-              key={t.id} 
-              onClick={() => setTab(t.id)}
-              className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                tab === t.id 
-                  ? 'bg-blue-500 text-white shadow-md' 
-                  : 'text-slate-500 hover:bg-slate-50'
-              }`}
-            >
-              {t.l}
+            <button type="button" className="rm-btn rm-btn--ghost rm-btn--icon" onClick={handleLogout} title="Odhlásit">
+              <IconPath type="logout" />
             </button>
-          ))}
-        </div>
+            <div className="rm-user">
+              <div className="rm-user-avatar">{userInitials}</div>
+              <div className="rm-user-meta">
+                <div className="rm-user-name">{user.email?.split('@')[0] || 'Uživatel'}</div>
+                <div className="rm-user-email">{user.email}</div>
+              </div>
+            </div>
+          </div>
+        </header>
 
-        {/* Content */}
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          {tab === 'heatmap' && (
+        {showFilterBar && (
+          <div className={`rm-filterbar ${customRangeOpen ? 'rm-filterbar--range-open' : ''}`}>
+            <div className="rm-filterbar-main">
+              <div className="rm-filter-group">
+                <span className="rm-filter-label">Období</span>
+                <div className="rm-segmented">
+                  {[
+                    ['today', 'Dnes'],
+                    ['yesterday', 'Včera'],
+                    ['this_week', 'Týden'],
+                    ['this_month', 'Měsíc'],
+                    ['last_30', '30 dní'],
+                  ].map(([preset, label]) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => applyPreset(preset)}
+                      className={`rm-segmented-btn ${activePreset === preset ? 'rm-segmented-btn--active' : ''}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <button
+                type="button"
+                className={`rm-range-toggle ${customRangeOpen || isCustomRangeActive ? 'rm-range-toggle--active' : ''}`}
+                onClick={() => setCustomRangeOpen((open) => !open)}
+                aria-expanded={customRangeOpen}
+                aria-controls="rm-custom-date-range"
+              >
+                <IconPath type="calendar" />
+                <span className="rm-range-label-desktop">Vlastní rozsah</span>
+                <span className="rm-range-label-mobile">Kalendář</span>
+                <span className="rm-range-toggle-dates">{customRangeSummary}</span>
+              </button>
+              <div className="rm-filter-sep" />
+              <div className="rm-filter-group">
+                <span className="rm-filter-label">Země</span>
+                <div className="rm-segmented">
+                  {countryOptions.map((item) => (
+                    <button
+                      key={item.c}
+                      type="button"
+                      onClick={() => setCountry(item.c)}
+                      className={`rm-segmented-btn ${country === item.c ? 'rm-segmented-btn--active' : ''}`}
+                    >
+                      {item.n}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="rm-filter-auto">
+                <span>auto-refresh 1 min</span>
+                <span className="rm-health-dot" />
+              </div>
+            </div>
+            {customRangeOpen && (
+              <div id="rm-custom-date-range" className="rm-date-range-panel">
+                <label className="rm-date-field">
+                  <span>Od</span>
+                  <input
+                    className="rm-date-input"
+                    type="date"
+                    value={dateFrom}
+                    onInput={(e) => handleDateChange('from', e.currentTarget.value)}
+                    onChange={(e) => handleDateChange('from', e.target.value)}
+                    aria-label="Datum od"
+                  />
+                </label>
+                <label className="rm-date-field">
+                  <span>Do</span>
+                  <input
+                    className="rm-date-input"
+                    type="date"
+                    value={dateTo}
+                    onInput={(e) => handleDateChange('to', e.currentTarget.value)}
+                    onChange={(e) => handleDateChange('to', e.target.value)}
+                    aria-label="Datum do"
+                  />
+                </label>
+                <span className="rm-date-range-hint">Vlastní období se použije hned po změně data.</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        <main className="rm-page">
+          {dataWarning && <div className="rm-alert rm-alert--warn">{dataWarning}</div>}
+          {canUseAds && adsSummary.warnings?.length > 0 && (
+            <div className="rm-alert rm-alert--danger">{adsSummary.warnings.join(' ')}</div>
+          )}
+
+          {tab === OVERVIEW_TAB_ID && showDashboardControls && (
+            <>
+              <div className="rm-alert">
+                <span className="rm-badge"><span className="rm-badge-dot" />Business-clean</span>
+                <span>Bez DPH a poštovného. Vyloučené STORNO a selhané platby.</span>
+                <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <span className="rm-health-dot" />Sync OK
+                </span>
+              </div>
+
+              <div className="rm-kpi-grid">
+                <KPICard title="Objednávky" value={formatNumber(kpis.orders)} />
+                <KPICard title="Obrat (bez DPH)" value={formatCurrency(kpis.revenue)} sub={adsPnoSub} subTone={hasAdsData ? 'red' : 'muted'} />
+                <KPICard title="Ø Objednávka" value={formatCurrency(kpis.aov)} />
+                <KPICard title="Tržba z poštovného" value={formatCurrency(kpis.shippingRevenue)} sub="bez DPH, mimo PNO" />
+                <KPICard title="Ads spend" value={adsSummary.loading ? '…' : adsSummary.error ? '—' : formatCurrency(adsSummary.spend)} sub={adsBreakdownSub} subTone={hasAdsData ? 'red' : 'muted'} />
+              </div>
+
+              {canUseAds && <AdsKpiStrip summary={adsSummary} revenue={kpis.revenue} revenueByMarket={revenueByMarket} onOpenAds={() => setTab(MODULE_IDS.ADS)} />}
+            </>
+          )}
+
+          {tab !== OVERVIEW_TAB_ID && (
+            <div className="rm-module-card">
+          {tab === MODULE_IDS.HEATMAP && canUseHeatmap && (
             <>
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-4">
                 <div>
@@ -1774,7 +2327,7 @@ export default function App() {
             </>
           )}
 
-          {tab === 'tempo' && (
+          {tab === MODULE_IDS.TEMPO && canUseTempo && (
             <>
               <div className="flex flex-col md:flex-row md:items-end justify-between gap-3 mb-4">
                 <div>
@@ -2080,7 +2633,7 @@ export default function App() {
             </>
           )}
 
-          {tab === 'geo' && (
+          {tab === MODULE_IDS.GEO && canUseGeo && (
             <>
               <h2 className="text-lg font-semibold text-slate-800 mb-2">🏙️ Velká města vs 🏘️ Menší města</h2>
               <p className="text-sm text-slate-500 mb-4">
@@ -2120,19 +2673,51 @@ export default function App() {
             </>
           )}
 
-          {tab === 'finance' && FINANCE_ALLOWED_EMAILS.includes(user?.email || '') && (
+          {tab === MODULE_IDS.FINANCE && canUseFinance && (
             <FinanceModule supabaseUrl={SUPABASE_URL} supabaseKey={SUPABASE_KEY} userEmail={user?.email} />
           )}
 
-          {tab === 'margin' && (
-            <MarginModule orders={filtered} dateFrom={dateFrom} dateTo={dateTo} country={country} />
+          {tab === MODULE_IDS.MARGIN && canUseMargin && (
+            <MarginModule orders={filtered} dateFrom={dateFrom} dateTo={dateTo} country={country} qualityWarning={marginDataWarning} />
           )}
 
-          {tab === 'ads' && (
+          {tab === MODULE_IDS.ADS && canUseAds && (
             <AdsModule supabaseClient={supabase} dateFrom={dateFrom} dateTo={dateTo} country={country} orders={filtered} />
           )}
 
-          {tab === 'b2b' && (
+          {tab === MODULE_IDS.PRODUCTS && canUseProducts && (
+            <ProductsModule
+              supabaseClient={supabase}
+              supabaseUrl={SUPABASE_URL}
+              supabaseKey={SUPABASE_KEY}
+              country={country}
+              orders={filtered}
+            />
+          )}
+
+          {tab === MODULE_IDS.IMPORT_LOGISTICS && canUseImportLogistics && (
+            <ModuleErrorBoundary label="Importní logistika">
+              <ImportLogisticsModule
+                supabaseClient={supabase}
+                supabaseUrl={SUPABASE_URL}
+                supabaseKey={SUPABASE_KEY}
+                canLoadSalesHistory={!access.isLogisticsOnly}
+                canUploadDocuments={access.canUploadImportDocuments}
+              />
+            </ModuleErrorBoundary>
+          )}
+
+          {tab === MODULE_IDS.POKEC && canUsePokec && (
+            <PokecModule
+              supabaseClient={supabase}
+              dateFrom={dateFrom}
+              dateTo={dateTo}
+              country={country}
+              userEmail={user?.email}
+            />
+          )}
+
+          {tab === MODULE_IDS.B2B && canUseB2b && (
             <>
               <h2 className="text-lg font-semibold text-slate-800 mb-2">🏢 B2B vs 👤 B2C analýza</h2>
               <p className="text-sm text-slate-500 mb-4">
@@ -2175,19 +2760,45 @@ export default function App() {
               </InsightBox>
             </>
           )}
-        </div>
+            </div>
+          )}
 
-        {/* Footer */}
-        <div className="mt-6 text-center">
-          <p className="text-sm text-slate-400 mb-1">
-            {formatNumber(filtered.length)} objednávek • Live data ze Supabase • 
-            Aktualizace: {new Date().toLocaleString('cs-CZ')}
-          </p>
-          <p className="text-xs text-slate-300 italic">
-            🚀 Tady taky stavíme impérium :)
-          </p>
-        </div>
+          <div className="mt-6 text-center">
+            <p className="text-sm text-slate-400 mb-1">
+              {formatNumber(filtered.length)} objednávek • Live data ze Supabase •
+              Aktualizace: {new Date().toLocaleString('cs-CZ')}
+            </p>
+            <p className="text-xs text-slate-300 italic">
+              🚀 Tady taky stavíme impérium :)
+            </p>
+          </div>
+        </main>
       </div>
+
+      <button
+        type="button"
+        aria-label="Zavřít menu"
+        className={`rm-sheet-bg ${mobileMenuOpen ? 'rm-sheet-bg--open' : ''}`}
+        onClick={() => setMobileMenuOpen(false)}
+      />
+      <aside className={`rm-sheet ${mobileMenuOpen ? 'rm-sheet--open' : ''}`} aria-hidden={!mobileMenuOpen}>
+        <div className="rm-brand">
+          <div className="rm-logo">RM</div>
+          <div className="min-w-0 flex-1">
+            <div className="rm-brand-name">RM Orders</div>
+            <div className="rm-brand-sub">Regal Master</div>
+          </div>
+          <button
+            type="button"
+            className="rm-btn rm-btn--ghost rm-btn--icon"
+            onClick={() => setMobileMenuOpen(false)}
+            aria-label="Zavřít navigaci"
+          >
+            <IconPath type="x" />
+          </button>
+        </div>
+        <nav className="rm-sidebar-nav">{navContent}</nav>
+      </aside>
     </div>
   );
 }

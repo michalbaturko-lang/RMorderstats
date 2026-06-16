@@ -17,6 +17,34 @@ import {
   resolveDateRange,
   supabaseRequest,
 } from './lib/ads-sync-utils.mjs';
+import { isExcludedBusinessOrder } from '../src/businessOrderStatus.js';
+import {
+  attachPurchasePriceLookup,
+  buildPurchasePriceLookup,
+  getOrderLineItems,
+  getLineBuyPriceWithoutVat,
+  getLineQuantity,
+  getLineRevenueWithoutVat,
+} from '../src/orderLineItems.js';
+import fs from 'node:fs';
+
+function loadLocalEnvFile(filePath = '.env.ads') {
+  if (!fs.existsSync(filePath)) return;
+  for (const rawLine of fs.readFileSync(filePath, 'utf8').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#') || !line.includes('=')) continue;
+    const eq = line.indexOf('=');
+    const key = line.slice(0, eq).trim();
+    if (process.env[key]) continue;
+    let value = line.slice(eq + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    process.env[key] = value;
+  }
+}
+
+loadLocalEnvFile();
 
 const CAMPAIGN_LEVEL = 'campaign';
 
@@ -50,7 +78,7 @@ function dateOnly(value) {
 }
 
 function getOrderCurrency(order) {
-  return order.currency || order.raw_data?.currency_id || 'CZK';
+  return order.currency || order.raw_data?.currency_id || order.raw_data?.currency?.code || order.raw_data?.currency || 'CZK';
 }
 
 function getOrderMarket(order) {
@@ -76,9 +104,7 @@ function deduplicateOrders(rows) {
 }
 
 function isCancelled(order) {
-  const status = String(order.status || '').toUpperCase();
-  const rawStatus = String(order.raw_data?.status || '').toUpperCase();
-  return status === 'STORNO' || rawStatus === 'STORNO';
+  return isExcludedBusinessOrder(order);
 }
 
 function emptyOrderMetrics() {
@@ -107,7 +133,7 @@ function emptyAdMetrics() {
 }
 
 function addOrderMetrics(target, order, fxRates) {
-  const products = Array.isArray(order.raw_data?.products) ? order.raw_data.products : [];
+  const products = getOrderLineItems(order, { allowRawFallback: false });
   const currency = getOrderCurrency(order);
   const rate = fxRates[currency];
   if (rate == null) throw new Error(`Missing FX rate for currency "${currency}"`);
@@ -117,9 +143,9 @@ function addOrderMetrics(target, order, fxRates) {
   let missingItems = 0;
 
   for (const product of products) {
-    const quantity = Math.max(toNumber(product.quantity), 1);
-    const buyPrice = toNumber(product.buy_price);
-    revenue += toNumber(product.price_without_vat);
+    const quantity = Math.max(getLineQuantity(product), 1);
+    const buyPrice = getLineBuyPriceWithoutVat(product);
+    revenue += getLineRevenueWithoutVat(product);
     if (buyPrice > 0) {
       cost += buyPrice * quantity;
     } else {
@@ -439,7 +465,7 @@ async function main() {
   console.log(`[check-ads-business-views] Range: ${from} -> ${to}`);
   console.log(`[check-ads-business-views] Providers: ${providers.join(', ')}`);
 
-  const [adRows, sourceOrderRows, orderView, providerBusinessView, totalBusinessView] = await Promise.all([
+  const [adRows, sourceOrderRowsRaw, purchasePriceRows, orderView, providerBusinessView, totalBusinessView] = await Promise.all([
     fetchAllRowsWithRange({
       supabaseUrl,
       serviceRoleKey,
@@ -452,9 +478,19 @@ async function main() {
       supabaseUrl,
       serviceRoleKey,
       table: 'orders',
-      select: 'id,order_date,created_at,market,currency,status,raw_data',
+      select: 'id,order_date,created_at,market,currency,status,raw_data,order_items(order_id,product_code,product_name,quantity,buy_price,unit_price_without_vat,total_price_without_vat,vat_rate,sku,ean)',
       filters: orderFilters,
       orderBy: 'order_date.desc',
+    }),
+    fetchAllRowsWithRange({
+      supabaseUrl,
+      serviceRoleKey,
+      table: 'upgates_product_purchase_prices_current',
+      select: 'product_code,currency,purchase_price_without_vat_native',
+      filters: {
+        purchase_price_without_vat_native: 'not.is.null',
+      },
+      orderBy: 'product_code.asc',
     }),
     fetchViewRows({
       supabaseUrl,
@@ -484,6 +520,8 @@ async function main() {
       orderBy: 'date.asc',
     }),
   ]);
+  const purchasePriceLookup = buildPurchasePriceLookup(purchasePriceRows);
+  const sourceOrderRows = attachPurchasePriceLookup(sourceOrderRowsRaw, purchasePriceLookup);
 
   const views = [orderView, providerBusinessView, totalBusinessView];
   const missing = views.filter((view) => view.missing);

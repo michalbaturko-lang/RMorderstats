@@ -19,7 +19,7 @@
  * - SYNC_FROM_DATE (YYYY-MM-DD)
  * - SYNC_TO_DATE (YYYY-MM-DD)
  * - SYNC_MARKETS (comma-separated markets, e.g. "ro" or "cz,sk")
- * - FX_RATES_JSON (default: {"CZK":1,"EUR":25.2,"HUF":0.063,"RON":5.1})
+ * - FX_RATES_JSON (default: values from src/currencyRates.js)
  *
  * Accounts JSON supports:
  * - market (required, example: cz/sk/hu/ro)
@@ -28,6 +28,8 @@
  * - activeFrom (optional, YYYY-MM-DD)
  * - activeTo (optional, YYYY-MM-DD)
  */
+
+import { FX_RATES_TO_CZK } from '../src/currencyRates.js';
 
 const REQUIRED_ENV_VARS = [
   'GOOGLE_ADS_DEVELOPER_TOKEN',
@@ -39,7 +41,7 @@ const REQUIRED_ENV_VARS = [
   'SUPABASE_SERVICE_ROLE_KEY',
 ];
 
-const DEFAULT_FX_RATES = { CZK: 1, EUR: 25.2, HUF: 0.063, RON: 5.1 };
+const DEFAULT_FX_RATES = FX_RATES_TO_CZK;
 const SUPPORTED_MARKETS = new Set(['cz', 'sk', 'hu', 'ro', 'unknown']);
 
 function requireEnv(name) {

@@ -25,13 +25,25 @@
     "check:ads-detail-health": "node scripts/check-ads-detail-health.mjs",
     "check:ads-sync-health": "node scripts/check-ads-sync-health.mjs",
     "verify:supabase-sql-safe": "node scripts/verify-supabase-sql-safe.mjs supabase/ad_business_analytics_views.sql",
+    "sync:upgates-purchase-prices": "node scripts/sync-upgates-purchase-prices.mjs",
+    "sync:upgates-stock": "node scripts/sync-upgates-stock.mjs",
+    "verify:margin-purchase-prices": "node scripts/verify-margin-purchase-prices.mjs",
+    "import:logistics:dry-run": "node scripts/import-logistics.mjs --dry-run",
+    "import:logistics": "node scripts/import-logistics.mjs --apply",
+    "verify:import-logistics": "node scripts/verify-import-logistics.mjs",
     "check:marketing-analytics-status": "node scripts/check-marketing-analytics-status.mjs",
-    "verify:ads-readonly": "node scripts/verify-google-ads-readonly.mjs"
+    "verify:ads-readonly": "node scripts/verify-google-ads-readonly.mjs",
+    "verify:permissions": "node scripts/verify-permissions.mjs",
+    "verify:ai-kolega": "node scripts/verify-ai-kolega-contract.mjs",
+    "eval:ai-kolega": "node scripts/run-pokec-evals.mjs",
+    "check:ai-kolega-readiness": "node scripts/check-ai-kolega-readiness.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.95.3",
+    "pdf-parse": "^2.4.5",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "read-excel-file": "^9.0.10",
     "recharts": "^3.8.0"
   },
   "devDependencies": {

@@ -1,6 +1,7 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { FX_RATES_TO_CZK } from '../../src/currencyRates.js';
 
-export const DEFAULT_FX_RATES = { CZK: 1, EUR: 25.2, HUF: 0.063, RON: 5.1 };
+export const DEFAULT_FX_RATES = FX_RATES_TO_CZK;
 export const SUPPORTED_MARKETS = new Set(['cz', 'sk', 'hu', 'ro', 'unknown']);
 
 export function requireEnv(name) {
@@ -156,39 +157,85 @@ export function chunkArray(items, size) {
   return chunks;
 }
 
-export async function supabaseRequest({ supabaseUrl, serviceRoleKey, path, method = 'GET', body, searchParams, prefer, headers: extraHeaders = {} }) {
-  const endpoint = new URL(path, supabaseUrl);
-  for (const [key, value] of Object.entries(searchParams || {})) {
-    if (value === undefined || value === null) continue;
-    if (Array.isArray(value)) {
-      for (const item of value) endpoint.searchParams.append(key, item);
-    } else {
-      endpoint.searchParams.set(key, value);
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientSupabaseError(error) {
+  const status = Number(error?.status);
+  if (Number.isFinite(status) && [408, 409, 425, 429, 500, 502, 503, 504].includes(status)) return true;
+  const message = String(error?.message || '').toLowerCase();
+  return (
+    message.includes('fetch failed') ||
+    message.includes('timed out') ||
+    message.includes('timeout') ||
+    message.includes('aborted') ||
+    message.includes('econnreset') ||
+    message.includes('socket hang up')
+  );
+}
+
+export async function supabaseRequest({
+  supabaseUrl,
+  serviceRoleKey,
+  path,
+  method = 'GET',
+  body,
+  searchParams,
+  prefer,
+  headers: extraHeaders = {},
+  timeoutMs = 30_000,
+  retryAttempts = 0,
+  retryDelayMs = 750,
+}) {
+  const attempts = Math.max(1, Number(retryAttempts) + 1);
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const endpoint = new URL(path, supabaseUrl);
+    for (const [key, value] of Object.entries(searchParams || {})) {
+      if (value === undefined || value === null) continue;
+      if (Array.isArray(value)) {
+        for (const item of value) endpoint.searchParams.append(key, item);
+      } else {
+        endpoint.searchParams.set(key, value);
+      }
+    }
+
+    const headers = {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      ...extraHeaders,
+    };
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    if (prefer) headers.Prefer = prefer;
+
+    try {
+      const response = await fetch(endpoint, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        const error = new Error(`Supabase request failed (${response.status}) ${method} ${endpoint.pathname}: ${text}`);
+        error.status = response.status;
+        throw error;
+      }
+
+      if (response.status === 204) return null;
+      const text = await response.text();
+      return text ? JSON.parse(text) : null;
+    } catch (error) {
+      if (attempt >= attempts || !isTransientSupabaseError(error)) {
+        throw error;
+      }
+      await sleep(retryDelayMs * attempt);
     }
   }
 
-  const headers = {
-    apikey: serviceRoleKey,
-    Authorization: `Bearer ${serviceRoleKey}`,
-    ...extraHeaders,
-  };
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
-  if (prefer) headers.Prefer = prefer;
-
-  const response = await fetch(endpoint, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Supabase request failed (${response.status}) ${method} ${endpoint.pathname}: ${text}`);
-  }
-
-  if (response.status === 204) return null;
-  const text = await response.text();
-  return text ? JSON.parse(text) : null;
+  throw new Error(`Supabase request failed unexpectedly for ${method} ${path}`);
 }
 
 export async function upsertSupabaseRows({ rows, supabaseUrl, serviceRoleKey, table, onConflict, chunkSize = 500 }) {
@@ -204,6 +251,7 @@ export async function upsertSupabaseRows({ rows, supabaseUrl, serviceRoleKey, ta
       searchParams: { on_conflict: onConflict },
       body: chunk,
       prefer: 'resolution=merge-duplicates,return=minimal',
+      retryAttempts: 2,
     });
     total += chunk.length;
   }
@@ -222,13 +270,16 @@ export async function insertRawInsights({ rows, supabaseUrl, serviceRoleKey }) {
 }
 
 export async function startSyncRun({ provider, syncType, from, to, supabaseUrl, serviceRoleKey }) {
+  const runId = randomUUID();
   const rows = await supabaseRequest({
     supabaseUrl,
     serviceRoleKey,
     path: '/rest/v1/ad_sync_runs',
     method: 'POST',
+    searchParams: { on_conflict: 'id' },
     body: [
       {
+        id: runId,
         provider,
         sync_type: syncType,
         range_from: from,
@@ -236,10 +287,12 @@ export async function startSyncRun({ provider, syncType, from, to, supabaseUrl, 
         status: 'running',
       },
     ],
-    prefer: 'return=representation',
+    prefer: 'resolution=merge-duplicates,return=representation',
+    retryAttempts: 3,
+    retryDelayMs: 1000,
   });
 
-  return rows?.[0]?.id || null;
+  return rows?.[0]?.id || runId;
 }
 
 export async function finishSyncRun({
@@ -266,6 +319,8 @@ export async function finishSyncRun({
       finished_at: new Date().toISOString(),
     },
     prefer: 'return=minimal',
+    retryAttempts: 3,
+    retryDelayMs: 1000,
   });
 }
 

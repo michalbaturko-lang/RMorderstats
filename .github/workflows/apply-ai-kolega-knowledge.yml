@@ -1,0 +1,63 @@
+name: Apply AI Kolega Knowledge Layer
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type APPLY_AI_KOLEGA_KNOWLEDGE to apply supabase/ai_kolega_knowledge.sql and supabase/ai_kolega_seed.sql'
+        required: true
+        default: ''
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run verify:ai-kolega
+
+      - name: Require explicit confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "APPLY_AI_KOLEGA_KNOWLEDGE" ]; then
+            echo "Refusing to apply SQL. Re-run with confirm=APPLY_AI_KOLEGA_KNOWLEDGE."
+            exit 1
+          fi
+
+      - name: Require database connection secret
+        run: |
+          if [ -z "${SUPABASE_DB_URL}" ]; then
+            echo "Missing SUPABASE_DB_URL secret. Add the Supabase Postgres connection string as a GitHub secret before running this workflow."
+            exit 1
+          fi
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+
+      - name: Install Postgres client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Apply AI knowledge schema
+        run: psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/ai_kolega_knowledge.sql
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+
+      - name: Apply AI knowledge seed
+        run: psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/ai_kolega_seed.sql
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+
+      - name: Live readiness check
+        run: npm run check:ai-kolega-readiness -- --live
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

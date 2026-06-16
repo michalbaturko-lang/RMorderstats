@@ -2,7 +2,8 @@
 -- Run after supabase/ad_marketing_analytics.sql.
 --
 -- These views intentionally do not write data. They normalize orders the same
--- way as the dashboard/audit scripts: deduplicate first, exclude STORNO orders,
+-- way as the dashboard/audit scripts: deduplicate first, exclude STORNO and
+-- failed-payment orders,
 -- calculate product revenue without VAT/shipping, and use exact gross profit
 -- only for orders where every product has a buy price.
 
@@ -24,15 +25,27 @@ with deduped_orders as (
 clean_orders as (
   select
     id,
-    coalesce(order_date, created_at)::date as date,
+    order_date::date as date,
     lower(coalesce(market, raw_data ->> 'language_id', 'unknown')) as market,
-    upper(coalesce(currency, raw_data ->> 'currency_id', 'CZK')) as currency,
+    upper(coalesce(
+      currency,
+      raw_data ->> 'currency_id',
+      raw_data -> 'currency' ->> 'code',
+      case when jsonb_typeof(raw_data -> 'currency') = 'string' then raw_data ->> 'currency' end,
+      'CZK'
+    )) as currency,
     raw_data,
-    case upper(coalesce(currency, raw_data ->> 'currency_id', 'CZK'))
+    case upper(coalesce(
+      currency,
+      raw_data ->> 'currency_id',
+      raw_data -> 'currency' ->> 'code',
+      case when jsonb_typeof(raw_data -> 'currency') = 'string' then raw_data ->> 'currency' end,
+      'CZK'
+    ))
       when 'CZK' then 1::numeric
-      when 'EUR' then 25.2::numeric
-      when 'HUF' then 0.063::numeric
-      when 'RON' then 5.1::numeric
+      when 'EUR' then 24.258970358814352::numeric
+      when 'HUF' then 0.06822999099587825::numeric
+      when 'RON' then 4.630859745682293::numeric
       else 1::numeric
     end as fx_rate,
     case
@@ -41,10 +54,26 @@ clean_orders as (
       else 0::numeric
     end as shipping_revenue_native
   from deduped_orders
-  where coalesce(upper(status), '') <> 'STORNO'
-    and coalesce(upper(raw_data ->> 'status'), '') <> 'STORNO'
+  where order_date is not null
+    and coalesce(upper(status), '') not like '%STORNO%'
+    and coalesce(upper(status), '') not like '%SELHAL%'
+    and coalesce(upper(raw_data ->> 'status'), '') not like '%STORNO%'
+    and coalesce(upper(raw_data ->> 'status'), '') not like '%SELHAL%'
 ),
-order_products as (
+latest_purchase_snapshot as (
+  select max(snapshot_date) as snapshot_date
+  from public.upgates_product_purchase_prices_daily
+),
+current_purchase_prices as (
+  select
+    p.product_code,
+    p.currency,
+    p.purchase_price_without_vat_native
+  from public.upgates_product_purchase_prices_daily p
+  join latest_purchase_snapshot l on l.snapshot_date = p.snapshot_date
+  where p.purchase_price_without_vat_native is not null
+),
+order_lines as (
   select
     o.id as order_id,
     o.date,
@@ -52,28 +81,44 @@ order_products as (
     o.currency,
     o.fx_rate,
     o.shipping_revenue_native,
-    product.value as product
+    coalesce(nullif(oi.product_code, ''), nullif(oi.sku, ''), nullif(raw_product.raw_code, '')) as product_code,
+    oi.sku,
+    oi.ean,
+    oi.product_name,
+    oi.quantity,
+    oi.buy_price,
+    oi.unit_price_without_vat,
+    oi.total_price_without_vat,
+    catalog_purchase.purchase_price_without_vat_native as catalog_buy_price,
+    raw_product.raw_buy_price,
+    raw_product.raw_buy_vat_rate
   from clean_orders o
-  left join lateral jsonb_array_elements(
-    case
-      when jsonb_typeof(o.raw_data -> 'products') = 'array' then o.raw_data -> 'products'
-      else '[]'::jsonb
-    end
-  ) as product(value) on true
-),
-line_values as (
-  select
-    order_id,
-    date,
-    market,
-    currency,
-    fx_rate,
-    shipping_revenue_native,
-    product,
-    replace(coalesce(product ->> 'price_without_vat', ''), ',', '.') as price_without_vat_raw,
-    replace(coalesce(product ->> 'quantity', ''), ',', '.') as quantity_raw,
-    replace(coalesce(product ->> 'buy_price', ''), ',', '.') as buy_price_raw
-  from order_products
+  left join public.order_items oi on oi.order_id = o.id
+  left join lateral (
+    select
+      coalesce(product ->> 'code', product ->> 'product_code', product ->> 'sku') as raw_code,
+      case
+        when replace(coalesce(product ->> 'buy_price', product ->> 'purchase_price', product ->> 'cost_without_vat', ''), ',', '.') ~ '^-?[0-9]+(\.[0-9]+)?$'
+          then replace(coalesce(product ->> 'buy_price', product ->> 'purchase_price', product ->> 'cost_without_vat', ''), ',', '.')::numeric
+        else 0::numeric
+      end as raw_buy_price,
+      case
+        when replace(coalesce(product ->> 'vat', product ->> 'vat_rate', ''), ',', '.') ~ '^-?[0-9]+(\.[0-9]+)?$'
+          then replace(coalesce(product ->> 'vat', product ->> 'vat_rate', ''), ',', '.')::numeric
+        else 0::numeric
+      end as raw_buy_vat_rate
+    from jsonb_array_elements(
+      case
+        when jsonb_typeof(o.raw_data -> 'products') = 'array' then o.raw_data -> 'products'
+        else '[]'::jsonb
+      end
+    ) as product
+    where coalesce(product ->> 'code', product ->> 'product_code', product ->> 'sku') = coalesce(oi.product_code, oi.sku, oi.ean)
+    limit 1
+  ) raw_product on true
+  left join current_purchase_prices catalog_purchase
+    on catalog_purchase.product_code = coalesce(nullif(oi.product_code, ''), nullif(oi.sku, ''), nullif(raw_product.raw_code, ''))
+   and catalog_purchase.currency = o.currency
 ),
 parsed_lines as (
   select
@@ -83,23 +128,29 @@ parsed_lines as (
     currency,
     fx_rate,
     shipping_revenue_native,
-    product,
-    case
-      when price_without_vat_raw ~ '^-?[0-9]+(\.[0-9]+)?$' then price_without_vat_raw::numeric
-      else 0::numeric
-    end as revenue_native,
+    product_code,
+    sku,
+    ean,
+    product_name,
     greatest(
-      case
-        when quantity_raw ~ '^-?[0-9]+(\.[0-9]+)?$' then quantity_raw::numeric
-        else 0::numeric
-      end,
+      coalesce(quantity, 0)::numeric,
       1::numeric
     ) as quantity,
+    coalesce(
+      total_price_without_vat::numeric,
+      coalesce(unit_price_without_vat, 0)::numeric * greatest(coalesce(quantity, 0)::numeric, 1::numeric),
+      0::numeric
+    ) as revenue_native,
     case
-      when buy_price_raw ~ '^-?[0-9]+(\.[0-9]+)?$' then buy_price_raw::numeric
-      else 0::numeric
+      when coalesce(catalog_buy_price, 0)::numeric > 0
+        then coalesce(catalog_buy_price, 0)::numeric
+      when coalesce(raw_buy_price, 0)::numeric > 0 and coalesce(raw_buy_vat_rate, 0)::numeric > 0
+        then coalesce(raw_buy_price, 0)::numeric / (1 + coalesce(raw_buy_vat_rate, 0)::numeric / 100)
+      when coalesce(raw_buy_price, 0)::numeric > 0
+        then coalesce(raw_buy_price, 0)::numeric
+      else coalesce(buy_price, 0)::numeric
     end as buy_price_native
-  from line_values
+  from order_lines
 ),
 order_metrics as (
   select
@@ -108,7 +159,7 @@ order_metrics as (
     market,
     currency,
     fx_rate,
-    count(product) as product_rows,
+    count(*) filter (where product_code is not null or sku is not null or ean is not null or product_name is not null) as product_rows,
     coalesce(sum(revenue_native), 0) as revenue_native,
     max(shipping_revenue_native) as shipping_revenue_native,
     coalesce(sum(
@@ -117,7 +168,10 @@ order_metrics as (
         else 0
       end
     ), 0) as cost_native,
-    count(product) filter (where product is not null and buy_price_native <= 0) as missing_cost_items
+    count(*) filter (
+      where (product_code is not null or sku is not null or ean is not null or product_name is not null)
+        and buy_price_native <= 0
+    ) as missing_cost_items
   from parsed_lines
   group by order_id, date, market, currency, fx_rate
 ),
