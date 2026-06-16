@@ -1206,6 +1206,7 @@ button {
 @media (max-width: 640px) {
   .rm-filterbar {
     padding: 8px 10px;
+    --rm-mobile-filter-width: min(100%, 18.5rem);
   }
 
   .rm-filterbar-main {
@@ -1237,7 +1238,14 @@ button {
   }
 
   .rm-filter-group:first-child .rm-segmented {
-    width: max-content;
+    width: var(--rm-mobile-filter-width);
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .rm-filter-group:first-child .rm-segmented-btn {
+    justify-content: center;
+    padding: 0;
   }
 
   .rm-range-toggle {
@@ -1247,9 +1255,13 @@ button {
   .rm-date-range-inline {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    width: min(100%, 25.25rem);
-    max-width: 100%;
+    gap: 1px;
+    width: var(--rm-mobile-filter-width);
+    max-width: var(--rm-mobile-filter-width);
+    padding: 2px;
+    border: 1px solid var(--rm-border);
+    border-radius: var(--rm-radius-sm);
+    background: var(--rm-panel);
   }
 
   .rm-date-range-inline .rm-date-field span {
@@ -1257,11 +1269,20 @@ button {
   }
 
   .rm-date-range-inline .rm-date-input {
+    -webkit-appearance: none;
+    appearance: none;
     box-sizing: border-box;
-    height: 36px;
+    width: 100%;
+    min-width: 0;
+    height: 30px;
     max-width: 100%;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    box-shadow: none;
     font-size: 12px;
-    padding: 0 7px;
+    text-align: center;
+    padding: 0 3px;
   }
 
   .rm-country-filter {
