@@ -466,6 +466,10 @@ button {
   box-shadow: var(--rm-shadow-sm);
 }
 
+.rm-date-range-inline {
+  display: none;
+}
+
 .rm-date-field {
   min-width: 0;
   display: grid;
@@ -1098,8 +1102,8 @@ button {
 
   .rm-filterbar-main {
     gap: 8px;
-    overflow-x: auto;
-    flex-wrap: nowrap;
+    overflow: visible;
+    flex-wrap: wrap;
     scrollbar-width: none;
   }
 
@@ -1200,6 +1204,16 @@ button {
 }
 
 @media (max-width: 640px) {
+  .rm-filterbar {
+    padding: 8px 10px;
+  }
+
+  .rm-filterbar-main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
   .rm-filter-group {
     gap: 6px;
   }
@@ -1212,25 +1226,56 @@ button {
     padding: 0 9px;
   }
 
-  .rm-range-toggle {
-    gap: 6px;
-    padding: 0 10px;
+  .rm-filter-group:first-child {
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
   }
 
-  .rm-range-label-desktop,
-  .rm-range-toggle-dates {
+  .rm-filter-group:first-child::-webkit-scrollbar {
     display: none;
   }
 
-  .rm-range-label-mobile {
-    display: inline;
+  .rm-filter-group:first-child .rm-segmented {
+    width: max-content;
+  }
+
+  .rm-range-toggle {
+    display: none;
+  }
+
+  .rm-date-range-inline {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .rm-date-range-inline .rm-date-field span {
+    display: none;
+  }
+
+  .rm-date-range-inline .rm-date-input {
+    height: 36px;
+    font-size: 12px;
+    padding: 0 7px;
+  }
+
+  .rm-country-filter {
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .rm-country-filter::-webkit-scrollbar {
+    display: none;
+  }
+
+  .rm-country-filter .rm-segmented {
+    width: max-content;
   }
 
   .rm-date-range-panel {
-    max-width: none;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    margin-top: 8px;
-    padding: 9px;
+    display: none;
   }
 
   .rm-date-range-hint {

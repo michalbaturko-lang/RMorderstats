@@ -2009,8 +2009,32 @@ export default function App() {
                 <span className="rm-range-label-mobile">Kalendář</span>
                 <span className="rm-range-toggle-dates">{customRangeSummary}</span>
               </button>
+              <div className="rm-date-range-inline" aria-label="Vlastní období">
+                <label className="rm-date-field">
+                  <span>Od</span>
+                  <input
+                    className="rm-date-input"
+                    type="date"
+                    value={dateFrom}
+                    onInput={(e) => handleDateChange('from', e.currentTarget.value)}
+                    onChange={(e) => handleDateChange('from', e.target.value)}
+                    aria-label="Datum od"
+                  />
+                </label>
+                <label className="rm-date-field">
+                  <span>Do</span>
+                  <input
+                    className="rm-date-input"
+                    type="date"
+                    value={dateTo}
+                    onInput={(e) => handleDateChange('to', e.currentTarget.value)}
+                    onChange={(e) => handleDateChange('to', e.target.value)}
+                    aria-label="Datum do"
+                  />
+                </label>
+              </div>
               <div className="rm-filter-sep" />
-              <div className="rm-filter-group">
+              <div className="rm-filter-group rm-country-filter">
                 <span className="rm-filter-label">Země</span>
                 <div className="rm-segmented">
                   {countryOptions.map((item) => (
