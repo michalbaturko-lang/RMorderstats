@@ -1248,6 +1248,8 @@ button {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
+    width: min(100%, 25.25rem);
+    max-width: 100%;
   }
 
   .rm-date-range-inline .rm-date-field span {
@@ -1255,7 +1257,9 @@ button {
   }
 
   .rm-date-range-inline .rm-date-input {
+    box-sizing: border-box;
     height: 36px;
+    max-width: 100%;
     font-size: 12px;
     padding: 0 7px;
   }
