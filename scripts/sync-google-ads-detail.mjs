@@ -510,6 +510,12 @@ const LEVEL_QUERIES = {
   conversion_action: { required: false, buildQuery: conversionActionQuery },
 };
 
+function compactErrorMessage(value, maxLength = 1200) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1)}…`;
+}
+
 function customerIdFromRow(row, fallback) {
   return normalizeCustomerId(row.customer?.id || fallback);
 }
@@ -825,10 +831,13 @@ export async function runGoogleAdsDetailSync() {
     const adRowsByKey = new Map();
     const metricRows = [];
     const rawRows = [];
+    let requiredLevelAttempts = 0;
+    let requiredLevelSuccesses = 0;
 
     for (const account of accounts) {
       for (const [level, config] of Object.entries(LEVEL_QUERIES)) {
         if (!levels.has(level)) continue;
+        if (config.required) requiredLevelAttempts += 1;
 
         try {
           const rows = await fetchGoogleRows({
@@ -862,12 +871,13 @@ export async function runGoogleAdsDetailSync() {
             }
           }
 
+          if (config.required) requiredLevelSuccesses += 1;
           console.log(`[sync-google-ads-detail] ${account.market.toUpperCase()} ${level}: ${rows.length} rows`);
         } catch (error) {
-          const message = `${account.market.toUpperCase()} ${level}: ${error.message}`;
-          if (config.required) throw new Error(message);
+          const message = compactErrorMessage(`${account.market.toUpperCase()} ${level}: ${error.message}`);
           warnings.push(message);
-          console.warn(`[sync-google-ads-detail] Optional level failed: ${message}`);
+          const label = config.required ? 'Required level failed' : 'Optional level failed';
+          console.warn(`[sync-google-ads-detail] ${label}: ${message}`);
         }
       }
     }
@@ -901,6 +911,10 @@ export async function runGoogleAdsDetailSync() {
       onConflict: 'metric_key',
     });
     rowsUpserted += await insertRawInsights({ rows: rawRows, supabaseUrl, serviceRoleKey });
+
+    if (requiredLevelAttempts > 0 && requiredLevelSuccesses === 0) {
+      throw new Error(compactErrorMessage(`All required Google Ads levels failed: ${warnings.join(' | ')}`));
+    }
 
     const status = warnings.length ? 'partial_success' : 'success';
     await finishSyncRun({ id: syncRunId, status, rowsUpserted, warnings, supabaseUrl, serviceRoleKey });

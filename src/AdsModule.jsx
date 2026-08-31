@@ -2615,9 +2615,11 @@ function ProviderCoverageCard({ row }) {
   const campaignRun = row.latestCampaignRun;
   const detailRun = row.latestDeepDetailRun;
   const campaignAge = syncAgeMinutes(campaignRun);
-  const campaignFresh = Boolean(campaignRun && campaignRun.status === 'success' && campaignAge <= MAX_CAMPAIGN_SYNC_AGE_MINUTES);
+  const campaignRunStatus = String(campaignRun?.status || '').toLowerCase();
+  const campaignRunUsable = ['success', 'partial_success'].includes(campaignRunStatus);
+  const campaignFresh = Boolean(campaignRun && campaignRunUsable && campaignAge <= MAX_CAMPAIGN_SYNC_AGE_MINUTES);
   const campaignFreshnessLabel = campaignRun
-    ? (campaignFresh ? 'fresh' : 'opožděné')
+    ? (campaignFresh ? (campaignRunStatus === 'partial_success' ? 'částečné' : 'čerstvé') : 'opožděné')
     : row.provider === 'meta_ads'
       ? 'čeká'
       : 'bez syncu';

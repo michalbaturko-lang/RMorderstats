@@ -59,6 +59,7 @@ const BUSINESS_VIEWS = [
   'marketing_business_provider_daily_summary',
   'marketing_business_daily_total',
 ];
+const USABLE_SYNC_STATUSES = new Set(['success', 'partial_success']);
 
 function parseCsv(value, fallback) {
   const values = String(value || '')
@@ -424,7 +425,7 @@ function printCampaignSyncFreshness(runs, providers, blockers, { maxAgeMinutes, 
     const run = latestProviderRun(runs, provider, 'campaign');
     const age = run ? ageMinutes(runTimestamp(run), now) : Number.POSITIVE_INFINITY;
     const shouldEnforce = enforced.has(provider);
-    const statusOk = run?.status === 'success';
+    const statusOk = USABLE_SYNC_STATUSES.has(String(run?.status || '').toLowerCase());
     const fresh = Boolean(run && statusOk && age <= maxAgeMinutes);
     const row = {
       provider,

@@ -189,13 +189,29 @@ function formatPragueTimestamp(value) {
   }).format(parsed);
 }
 
+function isUsableSyncStatus(status) {
+  return ['success', 'partial_success'].includes(normalizeProvider(status));
+}
+
+function syncWarningText(row) {
+  const warnings = Array.isArray(row?.warnings)
+    ? row.warnings.map((warning) => String(warning || '').trim()).filter(Boolean)
+    : [];
+  if (!warnings.length) return '';
+  const preview = warnings
+    .slice(0, 2)
+    .map((warning) => warning.length > 180 ? `${warning.slice(0, 179)}…` : warning)
+    .join(' | ');
+  return ` Dílčí chyba: ${preview}${warnings.length > 2 ? ` (+${warnings.length - 2})` : ''}`;
+}
+
 function summarizeSyncFreshness({ provider, rows, dateTo, needsCurrentFreshness }) {
   const providerRows = rows.filter((row) => (
     normalizeProvider(row.provider) === provider &&
     String(row.sync_type || '').toLowerCase().includes('campaign')
   ));
   const latest = providerRows[0];
-  const latestSuccess = providerRows.find((row) => normalizeProvider(row.status) === 'success');
+  const latestUsable = providerRows.find((row) => isUsableSyncStatus(row.status));
   const label = providerLabel(provider);
 
   if (!latest) {
@@ -213,39 +229,38 @@ function summarizeSyncFreshness({ provider, rows, dateTo, needsCurrentFreshness 
 
   const latestStatus = normalizeProvider(latest.status) || 'unknown';
   const latestFinishedAt = latest.finished_at || latest.started_at || null;
-  const latestSuccessFinishedAt = latestSuccess?.finished_at || latestSuccess?.started_at || null;
-  const latestSuccessRangeTo = latestSuccess?.range_to || null;
+  const latestUsableFinishedAt = latestUsable?.finished_at || latestUsable?.started_at || null;
+  const latestUsableRangeTo = latestUsable?.range_to || null;
   const latestActiveRefresh = ['running', 'pending'].includes(latestStatus);
-  const latestFinishedNonSuccess = ['failed', 'partial_success'].includes(latestStatus);
+  const latestFinishedNonSuccess = ['failed'].includes(latestStatus);
   const latestFailedAfterSuccess = latestFinishedNonSuccess && (
-    !latestSuccessFinishedAt ||
-    Date.parse(String(latestFinishedAt || '')) >= Date.parse(String(latestSuccessFinishedAt))
+    !latestUsableFinishedAt ||
+    Date.parse(String(latestFinishedAt || '')) >= Date.parse(String(latestUsableFinishedAt))
   );
 
-  if (!latestSuccess || !latestSuccessRangeTo || latestSuccessRangeTo < dateTo) {
+  if (!latestUsable || !latestUsableRangeTo || latestUsableRangeTo < dateTo) {
     return {
       provider,
       status: 'fail',
       latestStatus,
-      lastSuccessAt: latestSuccessFinishedAt,
-      lastSuccessAgeMinutes: latestSuccessFinishedAt ? Math.round(ageMinutes(latestSuccessFinishedAt)) : null,
-      lastSuccessRangeFrom: latestSuccess?.range_from || null,
-      lastSuccessRangeTo: latestSuccessRangeTo,
-      message: `${label}: poslední úspěšný campaign sync nepokrývá ${dateTo}, takže aktuální Ads spend může být neúplný.`,
+      lastSuccessAt: latestUsableFinishedAt,
+      lastSuccessAgeMinutes: latestUsableFinishedAt ? Math.round(ageMinutes(latestUsableFinishedAt)) : null,
+      lastSuccessRangeFrom: latestUsable?.range_from || null,
+      lastSuccessRangeTo: latestUsableRangeTo,
+      message: `${label}: poslední použitelný campaign sync nepokrývá ${dateTo}, takže aktuální Ads spend může být neúplný.`,
     };
   }
 
   if (needsCurrentFreshness && latestFailedAfterSuccess) {
-    const failureText = latestStatus === 'partial_success' ? 'neproběhl kompletně' : 'selhal';
     return {
       provider,
       status: 'fail',
       latestStatus,
-      lastSuccessAt: latestSuccessFinishedAt,
-      lastSuccessAgeMinutes: latestSuccessFinishedAt ? Math.round(ageMinutes(latestSuccessFinishedAt)) : null,
-      lastSuccessRangeFrom: latestSuccess?.range_from || null,
-      lastSuccessRangeTo: latestSuccessRangeTo,
-      message: `${label}: nejnovější campaign sync ${failureText} ${formatPragueTimestamp(latestFinishedAt)}. Dashboard teď může ukazovat jen částečný dnešní snapshot z posledního úspěšného běhu ${formatPragueTimestamp(latestSuccessFinishedAt)}.`,
+      lastSuccessAt: latestUsableFinishedAt,
+      lastSuccessAgeMinutes: latestUsableFinishedAt ? Math.round(ageMinutes(latestUsableFinishedAt)) : null,
+      lastSuccessRangeFrom: latestUsable?.range_from || null,
+      lastSuccessRangeTo: latestUsableRangeTo,
+      message: `${label}: nejnovější campaign sync selhal ${formatPragueTimestamp(latestFinishedAt)}. Dashboard teď může ukazovat jen snapshot z posledního použitelného běhu ${formatPragueTimestamp(latestUsableFinishedAt)}.`,
     };
   }
 
@@ -255,25 +270,38 @@ function summarizeSyncFreshness({ provider, rows, dateTo, needsCurrentFreshness 
       provider,
       status: 'ok',
       latestStatus,
-      lastSuccessAt: latestSuccessFinishedAt,
-      lastSuccessAgeMinutes: latestSuccessFinishedAt ? Math.round(ageMinutes(latestSuccessFinishedAt)) : null,
-      lastSuccessRangeFrom: latestSuccess?.range_from || null,
-      lastSuccessRangeTo: latestSuccessRangeTo,
-      message: `${label}: právě běží čerstvý campaign sync (${formatPragueTimestamp(latestFinishedAt)}), poslední úspěšný běh pokrývá ${latestSuccessRangeTo}.`,
+      lastSuccessAt: latestUsableFinishedAt,
+      lastSuccessAgeMinutes: latestUsableFinishedAt ? Math.round(ageMinutes(latestUsableFinishedAt)) : null,
+      lastSuccessRangeFrom: latestUsable?.range_from || null,
+      lastSuccessRangeTo: latestUsableRangeTo,
+      message: `${label}: právě běží čerstvý campaign sync (${formatPragueTimestamp(latestFinishedAt)}), poslední použitelný běh pokrývá ${latestUsableRangeTo}.`,
     };
   }
 
-  const successAge = latestSuccessFinishedAt ? ageMinutes(latestSuccessFinishedAt) : Number.POSITIVE_INFINITY;
+  const successAge = latestUsableFinishedAt ? ageMinutes(latestUsableFinishedAt) : Number.POSITIVE_INFINITY;
   if (needsCurrentFreshness && successAge > 45) {
     return {
       provider,
       status: 'warn',
       latestStatus,
-      lastSuccessAt: latestSuccessFinishedAt,
+      lastSuccessAt: latestUsableFinishedAt,
       lastSuccessAgeMinutes: Math.round(successAge),
-      lastSuccessRangeFrom: latestSuccess?.range_from || null,
-      lastSuccessRangeTo: latestSuccessRangeTo,
-      message: `${label}: poslední úspěšný campaign sync je starý ${Math.round(successAge)} min (${formatPragueTimestamp(latestSuccessFinishedAt)}), takže dnešní spend už nemusí být aktuální.`,
+      lastSuccessRangeFrom: latestUsable?.range_from || null,
+      lastSuccessRangeTo: latestUsableRangeTo,
+      message: `${label}: poslední použitelný campaign sync je starý ${Math.round(successAge)} min (${formatPragueTimestamp(latestUsableFinishedAt)}), takže dnešní spend už nemusí být aktuální.`,
+    };
+  }
+
+  if (latestUsable?.status === 'partial_success') {
+    return {
+      provider,
+      status: 'warn',
+      latestStatus,
+      lastSuccessAt: latestUsableFinishedAt,
+      lastSuccessAgeMinutes: Number.isFinite(successAge) ? Math.round(successAge) : null,
+      lastSuccessRangeFrom: latestUsable?.range_from || null,
+      lastSuccessRangeTo: latestUsableRangeTo,
+      message: `${label}: campaign sync je čerstvý, ale jen částečný (${formatPragueTimestamp(latestUsableFinishedAt)}).${syncWarningText(latestUsable)}`,
     };
   }
 
@@ -281,11 +309,11 @@ function summarizeSyncFreshness({ provider, rows, dateTo, needsCurrentFreshness 
     provider,
     status: 'ok',
     latestStatus,
-    lastSuccessAt: latestSuccessFinishedAt,
+    lastSuccessAt: latestUsableFinishedAt,
     lastSuccessAgeMinutes: Number.isFinite(successAge) ? Math.round(successAge) : null,
-    lastSuccessRangeFrom: latestSuccess?.range_from || null,
-    lastSuccessRangeTo: latestSuccessRangeTo,
-    message: `${label}: campaign sync je čerstvý (${formatPragueTimestamp(latestSuccessFinishedAt)}).`,
+    lastSuccessRangeFrom: latestUsable?.range_from || null,
+    lastSuccessRangeTo: latestUsableRangeTo,
+    message: `${label}: campaign sync je čerstvý (${formatPragueTimestamp(latestUsableFinishedAt)}).`,
   };
 }
 
@@ -331,7 +359,7 @@ async function fetchAdsRows({ dateFrom, dateTo, country }) {
 
 async function fetchSyncFreshness({ dateTo }) {
   const endpoint = new URL('/rest/v1/ad_sync_runs', SUPABASE_URL);
-  endpoint.searchParams.set('select', 'provider,sync_type,range_from,range_to,status,rows_upserted,error_message,started_at,finished_at');
+  endpoint.searchParams.set('select', 'provider,sync_type,range_from,range_to,status,rows_upserted,warnings,error_message,started_at,finished_at');
   endpoint.searchParams.set('provider', 'in.(google_ads,meta_ads)');
   endpoint.searchParams.set('order', 'started_at.desc');
   endpoint.searchParams.set('limit', '80');

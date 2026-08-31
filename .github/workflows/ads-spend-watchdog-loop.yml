@@ -1,8 +1,6 @@
 name: Ads Spend Watchdog Loop
 
 on:
-  schedule:
-    - cron: '6 */4 * * *'
   workflow_dispatch:
     inputs:
       duration_minutes:
