@@ -1,0 +1,45 @@
+name: Restart Ads Spend Watchdog
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        required: true
+        type: string
+      interval_minutes:
+        required: true
+        type: string
+      providers:
+        required: true
+        type: string
+      markets:
+        required: true
+        type: string
+      days_back:
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  restart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Wait for the previous watchdog to finish
+        run: sleep 30
+
+      - name: Start the next watchdog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run ads-spend-watchdog-loop.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "$GITHUB_REF_NAME" \
+            -f duration_minutes="${{ inputs.duration_minutes }}" \
+            -f interval_minutes="${{ inputs.interval_minutes }}" \
+            -f providers="${{ inputs.providers }}" \
+            -f markets="${{ inputs.markets }}" \
+            -f days_back="${{ inputs.days_back }}"
